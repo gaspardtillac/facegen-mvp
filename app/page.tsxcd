@@ -1,0 +1,81 @@
+"use client";
+import React, { useState, FormEvent } from "react";
+
+export default function Home() {
+  const [prompt, setPrompt] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleGenerate = async (e: FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    setResultUrl(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, imageUrl }),
+      });
+      const data = await res.json();
+      console.log("Réponse API complète:", data);
+      if (!res.ok) throw new Error(data.error || "Erreur inconnue");
+      
+      // Essaie plusieurs formats possibles
+      const finalUrl = data.imageUrl || data.output || (Array.isArray(data.output) ? data.output[0] : null);
+      if (finalUrl) {
+        setResultUrl(finalUrl);
+      } else {
+        throw new Error("Aucune image dans la réponse: " + JSON.stringify(data));
+      }
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <main style={{ maxWidth: 720, margin: "40px auto", padding: 16 }}>
+      <h1 style={{ fontSize: 28, fontWeight: 700 }}>Mini générateur (visage + prompt)</h1>
+      <form onSubmit={handleGenerate} style={{ display: "grid", gap: 12 }}>
+        <label>
+          <div style={{ fontWeight: 600 }}>URL de la photo (visage clair) *</div>
+          <input
+            placeholder="https://... (image publique)"
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+            required
+            style={{ width: "100%", padding: 8 }}
+          />
+        </label>
+        <label>
+          <div style={{ fontWeight: 600 }}>Prompt *</div>
+          <textarea
+            placeholder="portrait réaliste, lumière cinématographique, fond studio..."
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={4}
+            required
+            style={{ width: "100%", padding: 8 }}
+          />
+        </label>
+        <button type="submit" disabled={loading} style={{ padding: "10px 16px", fontWeight: 700 }}>
+          {loading ? "Génération..." : "Générer"}
+        </button>
+      </form>
+      {err && <p style={{ color: "crimson", marginTop: 12 }}>Erreur : {err}</p>}
+      {resultUrl && (
+        <div style={{ marginTop: 20 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Résultat</h2>
+          <img src={resultUrl} alt="Résultat IA" style={{ maxWidth: "100%", borderRadius: 8 }} />
+          <div style={{ marginTop: 8 }}>
+            <a href={resultUrl} download>Télécharger l image</a>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+} /Users/gaspardtillac/dev/facegen-mvp

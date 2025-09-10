@@ -1,0 +1,10 @@
+// Ajoutez ceci juste avant la fermeture du div principal dans page.tsx
+        
+        <footer style={{ marginTop: "60px", padding: "40px 0", borderTop: "1px solid rgba(255,255,255,0.2)", textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: "30px", marginBottom: "20px" }}>
+            <a href="/legal/mentions" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none" }}>Mentions légales</a>
+            <a href="/legal/cgv" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none" }}>CGV</a>
+            <a href="/legal/privacy" style={{ color: "rgba(255,255,255,0.8)", textDecoration: "none" }}>Confidentialité</a>
+          </div>
+          <p style={{ color: "rgba(255,255,255,0.6)", margin: 0 }}>© 2025 FaceGen AI - Powered by Google Imagen</p>
+        </footer>

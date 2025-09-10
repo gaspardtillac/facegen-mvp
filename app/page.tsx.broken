@@ -1,0 +1,290 @@
+"use client";
+import React, { useState, useRef, useEffect } from "react";
+
+export default function FaceGenApp() {
+  const [image, setImage] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [prompt, setPrompt] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [credits, setCredits] = useState(0);
+  const [showPricing, setShowPricing] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    fetchCredits();
+    loadHistory();
+  }, []);
+
+  const fetchCredits = async () => {
+    try {
+      const res = await fetch("/api/credits");
+      const data = await res.json();
+      setCredits(data.credits);
+    } catch (error) {
+      console.error("Erreur crédits:", error);
+    }
+  };
+
+  const loadHistory = () => {
+    const saved = localStorage.getItem("facegen-history");
+    if (saved) {
+      setHistory(JSON.parse(saved));
+    }
+  };
+
+  const saveToHistory = (imageUrl, prompt) => {
+    const newItem = {
+      id: Date.now(),
+      imageUrl,
+      prompt,
+      date: new Date().toLocaleDateString("fr-FR")
+    };
+    const newHistory = [newItem, ...history].slice(0, 20); // Garder max 20 items
+    setHistory(newHistory);
+    localStorage.setItem("facegen-history", JSON.stringify(newHistory));
+  };
+
+  const buyCredits = async (amount) => {
+    try {
+      const res = await fetch("/api/payment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credits: amount })
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (error) {
+      alert("Erreur paiement: " + error.message);
+    }
+  };
+
+  const upload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImage(event.target.result);
+        setPreview(URL.createObjectURL(file));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const generate = async () => {
+    if (credits <= 0) {
+      setShowPricing(true);
+      return;
+    }
+
+    setLoading(true);
+    setResult(null);
+    
+    try {
+      // Débiter le crédit AVANT la génération
+      const creditRes = await fetch("/api/credits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "use" })
+      });
+      
+      if (!creditRes.ok) {
+        throw new Error("Pas assez de crédits");
+      }
+
+      const creditData = await creditRes.json();
+      setCredits(creditData.remaining);
+
+      // Générer limage
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ faceImage: image, prompt })
+      });
+      
+      const data = await res.json();
+      
+      // Si génération échouée, rembourser le crédit
+      if (data.shouldRefund) {
+        const refundRes = await fetch("/api/credits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "refund" })
+        });
+        
+        if (refundRes.ok) {
+          const refundData = await refundRes.json();
+          setCredits(refundData.remaining);
+        }
+      }
+      
+      // Sauvegarder dans lhistorique si succès
+      if (data.hasImage && data.imageUrl) {
+        saveToHistory(data.imageUrl, prompt);
+      }
+      
+      setResult(data);
+      
+    } catch (error) {
+      setResult({ 
+        error: error.message,
+        message: "Erreur lors de la génération",
+        hasImage: false
+      });
+    }
+    setLoading(false);
+  };
+
+  const downloadImage = (imageUrl, filename = null) => {
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = filename || `facegen-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" }}>
+      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "40px 20px" }}>
+        
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "40px" }}>
+          <h1 style={{ fontSize: "2.5rem", fontWeight: "800", color: "white" }}>FaceGen AI</h1>
+          <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+            <button onClick={() => setShowHistory(true)} style={{ background: "rgba(255,255,255,0.2)", color: "white", border: "none", padding: "8px 16px", borderRadius: "20px", cursor: "pointer" }}>
+              Historique ({history.length})
+            </button>
+            <div style={{ background: "rgba(255,255,255,0.2)", padding: "12px 24px", borderRadius: "25px", color: "white", display: "flex", gap: "15px", alignItems: "center" }}>
+              <span>Crédits: {credits}</span>
+              <button onClick={() => setShowPricing(true)} style={{ background: "#48bb78", color: "white", border: "none", padding: "8px 16px", borderRadius: "20px", cursor: "pointer" }}>Acheter</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Historique */}
+        {showHistory && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ background: "white", padding: "40px", borderRadius: "20px", maxWidth: "800px", width: "90%", maxHeight: "80vh", overflow: "auto" }}>
+              <h2 style={{ marginBottom: "30px" }}>Historique des générations</h2>
+              {history.length === 0 ? (
+                <p>Aucune génération pour le moment.</p>
+              ) : (
+                <div style={{ display: "grid", gap: "20px" }}>
+                  {history.map(item => (
+                    <div key={item.id} style={{ display: "flex", gap: "15px", padding: "15px", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                      <img src={item.imageUrl} style={{ width: "80px", height: "80px", objectFit: "cover", borderRadius: "8px" }} />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontWeight: "600", margin: "0 0 5px 0" }}>{item.prompt}</p>
+                        <p style={{ color: "#64748b", fontSize: "0.9rem", margin: "0 0 10px 0" }}>{item.date}</p>
+                        <button onClick={() => downloadImage(item.imageUrl, `facegen-${item.id}.png`)} style={{ padding: "6px 12px", background: "#48bb78", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.8rem" }}>
+                          Télécharger
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => setShowHistory(false)} style={{ marginTop: "20px", width: "100%", padding: "10px", background: "#e2e8f0", border: "none", borderRadius: "8px", cursor: "pointer" }}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Pricing */}
+        {showPricing && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ background: "white", padding: "40px", borderRadius: "20px", maxWidth: "500px", width: "90%" }}>
+              <h2 style={{ textAlign: "center", marginBottom: "30px" }}>Packs de crédits</h2>
+              
+              <div style={{ background: "#f0f8ff", padding: "15px", borderRadius: "8px", marginBottom: "20px", textAlign: "center" }}>
+                <h4 style={{ margin: "0 0 5px 0", color: "#2563eb" }}>Offre de lancement</h4>
+                <p style={{ margin: "0", fontSize: "0.9rem", color: "#64748b" }}>3 générations gratuites pour tous les nouveaux utilisateurs</p>
+              </div>
+              
+              <div style={{ display: "grid", gap: "20px" }}>
+                <div style={{ border: "2px solid #667eea", padding: "20px", borderRadius: "12px", textAlign: "center" }}>
+                  <h3>Pack Starter</h3>
+                  <div style={{ fontSize: "2rem", fontWeight: "bold", color: "#667eea" }}>2€</div>
+                  <div>10 crédits</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>0,20€ par génération</div>
+                  <button onClick={() => buyCredits(10)} style={{ marginTop: "15px", padding: "10px 20px", background: "#667eea", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>Acheter</button>
+                </div>
+                
+                <div style={{ border: "2px solid #48bb78", padding: "20px", borderRadius: "12px", textAlign: "center", position: "relative" }}>
+                  <div style={{ position: "absolute", top: "-10px", right: "10px", background: "#48bb78", color: "white", padding: "5px 10px", borderRadius: "12px", fontSize: "0.8rem" }}>POPULAIRE</div>
+                  <h3>Pack Pro</h3>
+                  <div style={{ fontSize: "2rem", fontWeight: "bold", color: "#48bb78" }}>5€</div>
+                  <div>30 crédits</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>0,17€ par génération</div>
+                  <button onClick={() => buyCredits(30)} style={{ marginTop: "15px", padding: "10px 20px", background: "#48bb78", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>Acheter</button>
+                </div>
+                
+                <div style={{ border: "2px solid #ed8936", padding: "20px", borderRadius: "12px", textAlign: "center" }}>
+                  <h3>Pack Premium</h3>
+                  <div style={{ fontSize: "2rem", fontWeight: "bold", color: "#ed8936" }}>10€</div>
+                  <div>70 crédits</div>
+                  <div style={{ fontSize: "0.8rem", color: "#64748b" }}>0,14€ par génération</div>
+                  <button onClick={() => buyCredits(70)} style={{ marginTop: "15px", padding: "10px 20px", background: "#ed8936", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>Acheter</button>
+                </div>
+              </div>
+              
+              <button onClick={() => setShowPricing(false)} style={{ marginTop: "20px", width: "100%", padding: "10px", background: "#e2e8f0", border: "none", borderRadius: "8px", cursor: "pointer" }}>Fermer</button>
+            </div>
+          </div>
+        )}
+
+        <div style={{ background: "white", borderRadius: "24px", padding: "40px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "40px", marginBottom: "40px" }}>
+            <div>
+              <h3>Votre Photo</h3>
+              <div onClick={() => ref.current?.click()} style={{ border: "3px dashed #e2e8f0", borderRadius: "16px", padding: "40px", textAlign: "center", cursor: "pointer", minHeight: "200px" }}>
+                {preview ? <img src={preview} style={{ maxHeight: "180px", borderRadius: "12px" }} /> : <div><div style={{ fontSize: "3rem" }}>📸</div><p>Cliquez pour uploader</p></div>}
+              </div>
+              <input ref={ref} type="file" accept="image/*" onChange={upload} style={{ display: "none" }} />
+            </div>
+            <div>
+              <h3>Configuration</h3>
+              <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="dans un café parisien..." style={{ width: "100%", height: "100px", padding: "16px", border: "2px solid #e2e8f0", borderRadius: "12px", marginBottom: "15px" }} />
+            </div>
+          </div>
+          
+          <button onClick={generate} disabled={!image || !prompt || loading} style={{ width: "100%", padding: "16px", fontSize: "1.1rem", background: loading ? "#a0aec0" : (credits > 0 ? "#48bb78" : "#e53e3e"), color: "white", border: "none", borderRadius: "12px", cursor: loading ? "not-allowed" : "pointer", marginBottom: "20px" }}>
+            {loading ? "Génération en cours..." : credits > 0 ? `Générer (1 crédit sera utilisé)` : "Acheter des crédits"}
+          </button>
+          
+          {result && (
+            <div style={{ textAlign: "center", padding: "20px", background: result.hasImage ? "#f8fdf8" : "#fef2f2", border: `2px solid ${result.hasImage ? "#48bb78" : "#ef4444"}`, borderRadius: "12px" }}>
+              {result.hasImage && result.imageUrl ? (
+                <div>
+                  <h3 style={{ color: "#2d5a2d", marginBottom: "20px" }}>Image générée avec succès !</h3>
+                  <img src={result.imageUrl} style={{ maxWidth: "100%", borderRadius: "12px", marginBottom: "20px", boxShadow: "0 8px 16px rgba(0,0,0,0.1)" }} />
+                  <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+                    <button onClick={() => downloadImage(result.imageUrl)} style={{ padding: "12px 24px", background: "#48bb78", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontWeight: "600" }}>
+                      Télécharger
+                    </button>
+                    <button onClick={() => setResult(null)} style={{ padding: "12px 24px", background: "#6b7280", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>
+                      Nouvelle génération
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <h3 style={{ color: "#dc2626", marginBottom: "15px" }}>Génération échouée</h3>
+                  <p style={{ color: "#7f1d1d", marginBottom: "15px" }}>{result.message}</p>
+                  <button onClick={() => setResult(null)} style={{ padding: "10px 20px", background: "#ef4444", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>
+                    Réessayer
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

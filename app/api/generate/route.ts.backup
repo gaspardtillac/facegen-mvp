@@ -1,0 +1,91 @@
+import { NextResponse } from "next/server";
+
+export async function POST(req: Request) {
+  try {
+    const { prompt, imageUrl } = await req.json();
+
+    // Étape 1: Upload de l'image vers Leonardo pour obtenir un ID
+    console.log("Upload image vers Leonardo...");
+    
+    // Convertir base64 en blob pour Leonardo
+    const base64Data = imageUrl.split(',')[1];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    const formData = new FormData();
+    formData.append('image', new Blob([buffer], { type: 'image/jpeg' }), 'image.jpg');
+
+    const uploadResponse = await fetch("https://cloud.leonardo.ai/api/rest/v1/init-image", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.LEONARDO_API_TOKEN}`,
+      },
+      body: formData,
+    });
+
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      console.log("LEONARDO UPLOAD ERROR:", errorText);
+      return NextResponse.json({ error: `Erreur upload Leonardo: ${errorText}` }, { status: uploadResponse.status });
+    }
+
+    const uploadData = await uploadResponse.json();
+    const initImageId = uploadData.uploadInitImage.id;
+    console.log("Image uploadée, ID:", initImageId);
+
+    // Étape 2: Génération avec l'ID de l'image
+    const r = await fetch("https://cloud.leonardo.ai/api/rest/v1/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.LEONARDO_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        height: 1024,
+        width: 1024,
+        modelId: "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+        prompt: prompt,
+        num_images: 1,
+        guidance_scale: 7,
+        init_image_id: initImageId,
+        init_strength: 0.4
+      }),
+    });
+
+    if (!r.ok) {
+      const errorText = await r.text();
+      console.log("LEONARDO GENERATION ERROR:", errorText);
+      return NextResponse.json({ error: `Erreur génération Leonardo: ${errorText}` }, { status: r.status });
+    }
+
+    const data = await r.json();
+    const generationId = data.sdGenerationJob.generationId;
+    
+    console.log("LEONARDO GENERATION ID:", generationId);
+
+    // Étape 3: Polling pour la completion
+    for (let i = 0; i < 20; i++) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const statusResponse = await fetch(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {
+        headers: {
+          Authorization: `Bearer ${process.env.LEONARDO_API_TOKEN}`,
+        },
+      });
+
+      const statusData = await statusResponse.json();
+      console.log(`Leonardo poll ${i + 1}: ${statusData.generations_by_pk?.status}`);
+      
+      if (statusData.generations_by_pk?.status === "COMPLETE") {
+        const imageUrl = statusData.generations_by_pk.generated_images[0].url;
+        return NextResponse.json({ imageUrl });
+      } else if (statusData.generations_by_pk?.status === "FAILED") {
+        return NextResponse.json({ error: "Génération échouée" }, { status: 500 });
+      }
+    }
+    
+    return NextResponse.json({ error: "Timeout" }, { status: 500 });
+  } catch (error) {
+    console.error("LEONARDO API ERROR:", error);
+    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+  }
+}

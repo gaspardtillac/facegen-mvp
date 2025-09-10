@@ -8,8 +8,22 @@
     "start": "next start"
   },
   "dependencies": {
+    "@auth/supabase-adapter": "^1.10.0",
+    "@stripe/stripe-js": "^7.9.0",
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "lucide-react": "^0.542.0",
+    "next": "15.5.2",
+    "next-auth": "^4.24.11",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "next": "15.5.2"
+    "sharp": "^0.34.3",
+    "stripe": "^18.5.0"
+  },
+  "devDependencies": {
+    "@types/next-auth": "^3.13.0",
+    "@types/node": "24.3.0",
+    "@types/react": "19.1.12",
+    "typescript": "5.9.2"
   }
 }

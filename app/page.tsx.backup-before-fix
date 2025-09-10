@@ -1,0 +1,612 @@
+"use client";
+import React, { useState, useRef, useEffect } from "react";
+import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
+
+export default function FaceGenApp() {
+  const { data: session } = useSession();
+  const router = useRouter();
+  const [image, setImage] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [prompt, setPrompt] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [credits, setCredits] = useState(50); // Toujours 50 par défaut
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showFullImage, setShowFullImage] = useState(false);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (session) {
+      // Si utilisateur connecté, récupérer depuis la DB
+      fetchCreditsFromDB();
+    } else {
+      // Si utilisateur anonyme, gérer avec localStorage
+      const savedCredits = localStorage.getItem("anonymous-credits");
+      if (savedCredits) {
+        setCredits(parseInt(savedCredits));
+      } else {
+        // Premier visiteur anonyme : donner 50 crédits
+        setCredits(50);
+        localStorage.setItem("anonymous-credits", "50");
+      }
+    }
+    loadHistory();
+
+    const handleMouseMove = (e) => {
+      setMousePosition({
+        x: (e.clientX / window.innerWidth) * 100,
+        y: (e.clientY / window.innerHeight) * 100
+      });
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [session]);
+
+  const fetchCreditsFromDB = async () => {
+    try {
+      const res = await fetch("/api/credits");
+      const data = await res.json();
+      setCredits(data.credits);
+    } catch (error) {
+      console.error("Erreur crédits:", error);
+      // En cas d'erreur, garder les crédits actuels
+    }
+  };
+
+  const loadHistory = () => {
+    try {
+      const saved = localStorage.getItem("facegen-history");
+      if (saved) {
+        setHistory(JSON.parse(saved));
+      }
+    } catch (error) {
+      console.error("Erreur historique:", error);
+    }
+  };
+
+  const saveToHistory = (originalImage, generatedImage, promptUsed) => {
+    const newEntry = {
+      id: Date.now(),
+      original: originalImage,
+      generated: generatedImage,
+      prompt: promptUsed,
+      timestamp: new Date().toLocaleString()
+    };
+    
+    const updatedHistory = [newEntry, ...history].slice(0, 10);
+    setHistory(updatedHistory);
+    localStorage.setItem("facegen-history", 
+JSON.stringify(updatedHistory));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!image) {
+      alert("Veuillez sélectionner une image");
+      return;
+    }
+
+    if (credits <= 0) {
+      alert("Crédits insuffisants");
+      return;
+    }
+
+    setLoading(true);
+    setResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", image);
+      formData.append("prompt", prompt || "professional headshot, high 
+quality");
+
+      // Décrémenter les crédits avant l'appel
+      const newCredits = credits - 1;
+      setCredits(newCredits);
+      
+      // Sauvegarder immédiatement dans localStorage pour les anonymes
+      if (!session) {
+        localStorage.setItem("anonymous-credits", newCredits.toString());
+      }
+
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setResult({
+          hasImage: true,
+          imageUrl: data.imageUrl,
+          message: "Avatar généré avec succès!"
+        });
+        
+        saveToHistory(preview, data.imageUrl, prompt || "professional 
+headshot");
+        
+        // Mettre à jour les crédits depuis la réponse API si connecté
+        if (session && data.remaining !== undefined) {
+          setCredits(data.remaining);
+        }
+      } else {
+        setResult({
+          hasImage: false,
+          message: data.error || "Erreur lors de la génération"
+        });
+        
+        // Restaurer les crédits en cas d'erreur
+        setCredits(credits);
+        if (!session) {
+          localStorage.setItem("anonymous-credits", credits.toString());
+        }
+      }
+    } catch (error) {
+      console.error("Erreur:", error);
+      setResult({
+        hasImage: false,
+        message: "Erreur réseau"
+      });
+      
+      // Restaurer les crédits en cas d'erreur
+      setCredits(credits);
+      if (!session) {
+        localStorage.setItem("anonymous-credits", credits.toString());
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setPreview(e.target.result);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleBuyCredits = () => {
+    router.push('/auth');
+  };
+
+  return (
+    <div style={{ 
+      minHeight: "100vh", 
+      background: `radial-gradient(circle at ${mousePosition.x}% 
+${mousePosition.y}%, rgba(99, 102, 241, 0.15) 0%, transparent 50%), 
+linear-gradient(135deg, #667eea 0%, #764ba2 100%)`,
+      transition: "background 0.3s ease"
+    }}>
+      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "40px 
+20px" }}>
+        
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: "40px" }}>
+          <h1 style={{ 
+            fontSize: "3rem", 
+            fontWeight: "bold", 
+            background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 
+100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            marginBottom: "10px",
+            textShadow: "0 4px 8px rgba(0,0,0,0.3)"
+          }}>
+            MonAvatarIA
+          </h1>
+          
+          <p style={{ 
+            fontSize: "1.2rem", 
+            color: "rgba(255,255,255,0.9)", 
+            marginBottom: "20px",
+            textShadow: "0 2px 4px rgba(0,0,0,0.3)"
+          }}>
+            Transformez vos photos en avatars IA professionnels
+          </p>
+
+          {/* Credits et Auth */}
+          <div style={{ 
+            display: "flex", 
+            justifyContent: "center", 
+            alignItems: "center", 
+            gap: "20px",
+            flexWrap: "wrap"
+          }}>
+            <div style={{ 
+              background: "rgba(255,255,255,0.2)", 
+              padding: "10px 20px", 
+              borderRadius: "25px",
+              backdropFilter: "blur(10px)",
+              border: "1px solid rgba(255,255,255,0.3)"
+            }}>
+              <span style={{ color: "white", fontWeight: "600" }}>
+                Crédits : {credits}
+              </span>
+            </div>
+            
+            {session ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 
+"10px" }}>
+                <span style={{ color: "white" }}>
+                  Connecté : {session.user?.email}
+                </span>
+                <button 
+                  onClick={() => signOut()}
+                  style={{
+                    background: "rgba(255,255,255,0.2)",
+                    color: "white",
+                    border: "1px solid rgba(255,255,255,0.3)",
+                    padding: "8px 16px",
+                    borderRadius: "20px",
+                    cursor: "pointer",
+                    backdropFilter: "blur(10px)"
+                  }}
+                >
+                  Déconnexion
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => router.push('/auth')}
+                style={{
+                  background: "rgba(255,255,255,0.2)",
+                  color: "white",
+                  border: "1px solid rgba(255,255,255,0.3)",
+                  padding: "10px 20px",
+                  borderRadius: "25px",
+                  cursor: "pointer",
+                  backdropFilter: "blur(10px)",
+                  fontWeight: "600"
+                }}
+              >
+                Se connecter
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", 
+gap: "40px", alignItems: "start" }}>
+          
+          {/* Section Générateur */}
+          <div style={{ 
+            background: "rgba(255,255,255,0.95)", 
+            padding: "30px", 
+            borderRadius: "20px",
+            backdropFilter: "blur(20px)",
+            border: "1px solid rgba(255,255,255,0.2)",
+            boxShadow: "0 20px 40px rgba(0,0,0,0.1)"
+          }}>
+            <h2 style={{ marginBottom: "20px", color: "#2d3748", fontSize: 
+"1.5rem", fontWeight: "600" }}>
+              Créer un Avatar
+            </h2>
+            
+            <form onSubmit={handleSubmit}>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", marginBottom: "10px", 
+color: "#4a5568", fontWeight: "500" }}>
+                  Sélectionnez votre photo :
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  style={{ 
+                    width: "100%", 
+                    padding: "12px", 
+                    border: "2px dashed #cbd5e0", 
+                    borderRadius: "10px",
+                    backgroundColor: "#f7fafc"
+                  }}
+                />
+              </div>
+
+              {preview && (
+                <div style={{ marginBottom: "20px", textAlign: "center" 
+}}>
+                  <img 
+                    src={preview} 
+                    alt="Aperçu" 
+                    style={{ 
+                      maxWidth: "200px", 
+                      maxHeight: "200px", 
+                      borderRadius: "10px",
+                      boxShadow: "0 4px 8px rgba(0,0,0,0.1)"
+                    }} 
+                  />
+                </div>
+              )}
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", marginBottom: "10px", 
+color: "#4a5568", fontWeight: "500" }}>
+                  Style souhaité (optionnel) :
+                </label>
+                <input
+                  type="text"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Ex: portrait professionnel, style 
+artistique..."
+                  style={{ 
+                    width: "100%", 
+                    padding: "12px", 
+                    border: "2px solid #e2e8f0", 
+                    borderRadius: "10px",
+                    fontSize: "16px"
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || credits <= 0}
+                style={{
+                  width: "100%",
+                  padding: "15px",
+                  background: loading || credits <= 0 
+                    ? "linear-gradient(135deg, #9ca3af 0%, #6b7280 100%)"
+                    : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "10px",
+                  fontSize: "18px",
+                  cursor: loading || credits <= 0 ? "not-allowed" : 
+"pointer",
+                  marginBottom: "20px",
+                  fontWeight: "600",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                  transition: "all 0.3s ease"
+                }}
+              >
+                {loading ? "Création en cours..." : credits > 0 ? "Créer 
+mon avatar" : "Acheter des crédits"}
+              </button>
+            </form>
+
+            {result && (
+              <div style={{ 
+                textAlign: "center", 
+                padding: "20px", 
+                background: result.hasImage ? "#f0fdf4" : "#fef2f2", 
+                border: `2px solid ${result.hasImage ? "#48bb78" : 
+"#ef4444"}`, 
+                borderRadius: "10px" 
+              }}>
+                <p style={{ 
+                  color: result.hasImage ? "#2f855a" : "#c53030", 
+                  marginBottom: result.hasImage ? "15px" : "0" 
+                }}>
+                  {result.message}
+                </p>
+                
+                {result.hasImage && result.imageUrl && (
+                  <div>
+                    <img 
+                      src={result.imageUrl} 
+                      alt="Avatar généré" 
+                      style={{ 
+                        maxWidth: "300px", 
+                        borderRadius: "10px",
+                        boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
+                        cursor: "pointer"
+                      }}
+                      onClick={() => setShowFullImage(true)}
+                    />
+                    <div style={{ marginTop: "10px" }}>
+                      <a 
+                        href={result.imageUrl} 
+                        download="mon-avatar.jpg"
+                        style={{
+                          display: "inline-block",
+                          padding: "10px 20px",
+                          background: "#48bb78",
+                          color: "white",
+                          textDecoration: "none",
+                          borderRadius: "8px",
+                          fontWeight: "500"
+                        }}
+                      >
+                        Télécharger
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {credits <= 0 && (
+              <div style={{ 
+                textAlign: "center", 
+                padding: "20px", 
+                background: "#fef2f2", 
+                border: "2px solid #ef4444", 
+                borderRadius: "10px",
+                marginTop: "20px"
+              }}>
+                <p style={{ color: "#c53030", marginBottom: "15px" }}>
+                  Plus de crédits disponibles
+                </p>
+                <button
+                  onClick={handleBuyCredits}
+                  style={{
+                    padding: "12px 24px",
+                    background: "linear-gradient(135deg, #48bb78 0%, 
+#38a169 100%)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontWeight: "600"
+                  }}
+                >
+                  Acheter des crédits
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Section Exemples */}
+          <div style={{ 
+            background: "rgba(255,255,255,0.95)", 
+            padding: "30px", 
+            borderRadius: "20px",
+            backdropFilter: "blur(20px)",
+            border: "1px solid rgba(255,255,255,0.2)",
+            boxShadow: "0 20px 40px rgba(0,0,0,0.1)"
+          }}>
+            <h2 style={{ marginBottom: "20px", color: "#2d3748", fontSize: 
+"1.5rem", fontWeight: "600" }}>
+              Exemples de Transformations
+            </h2>
+            
+            <div style={{ display: "grid", gap: "20px" }}>
+              <div style={{ 
+                display: "grid", 
+                gridTemplateColumns: "1fr 1fr", 
+                gap: "15px", 
+                alignItems: "center",
+                padding: "15px",
+                background: "#f7fafc",
+                borderRadius: "10px"
+              }}>
+                <div style={{ textAlign: "center" }}>
+                  <p style={{ fontSize: "14px", color: "#718096", 
+marginBottom: "8px" }}>Avant</p>
+                  <img 
+                    src="/examples/original1.jpg" 
+                    alt="Photo originale" 
+                    style={{ 
+                      width: "100%", 
+                      height: "140px", 
+                      objectFit: "cover", 
+                      borderRadius: "8px",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+                    }} 
+                  />
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <p style={{ fontSize: "14px", color: "#718096", 
+marginBottom: "8px" }}>Après</p>
+                  <img 
+                    src="/examples/generated1.jpg" 
+                    alt="Avatar généré" 
+                    style={{ 
+                      width: "100%", 
+                      height: "140px", 
+                      objectFit: "cover", 
+                      borderRadius: "8px",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
+                    }} 
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Historique */}
+            {history.length > 0 && (
+              <div style={{ marginTop: "30px" }}>
+                <button
+                  onClick={() => setShowHistory(!showHistory)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "linear-gradient(135deg, #6b7280 0%, 
+#4b5563 100%)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    marginBottom: "15px",
+                    fontWeight: "500"
+                  }}
+                >
+                  {showHistory ? "Masquer" : "Voir"} l'historique 
+({history.length})
+                </button>
+
+                {showHistory && (
+                  <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                    {history.map((item) => (
+                      <div key={item.id} style={{ 
+                        marginBottom: "15px", 
+                        padding: "15px", 
+                        background: "#f7fafc", 
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0"
+                      }}>
+                        <div style={{ display: "grid", 
+gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+                          <img 
+                            src={item.original} 
+                            alt="Original" 
+                            style={{ width: "100%", height: "80px", 
+objectFit: "cover", borderRadius: "6px" }} 
+                          />
+                          <img 
+                            src={item.generated} 
+                            alt="Généré" 
+                            style={{ width: "100%", height: "80px", 
+objectFit: "cover", borderRadius: "6px" }} 
+                          />
+                        </div>
+                        <p style={{ fontSize: "12px", color: "#718096" }}>
+                          {item.timestamp}
+                        </p>
+                        {item.prompt && (
+                          <p style={{ fontSize: "13px", color: "#4a5568", 
+fontStyle: "italic" }}>
+                            "{item.prompt}"
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Modal Image */}
+        {showFullImage && result?.imageUrl && (
+          <div 
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              background: "rgba(0,0,0,0.8)",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              zIndex: 1000
+            }}
+            onClick={() => setShowFullImage(false)}
+          >
+            <img 
+              src={result.imageUrl} 
+              alt="Avatar en grand" 
+              style={{ 
+                maxWidth: "90%", 
+                maxHeight: "90%", 
+                borderRadius: "10px",
+                boxShadow: "0 20px 40px rgba(0,0,0,0.3)"
+              }} 
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
