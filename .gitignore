@@ -4,3 +4,13 @@ node_modules
 .env
 .env.local
 
+# Variables d'environnement
+.env
+.env.local
+.env.production
+backend/.env
+backend/.env.*
+
+# Logs et cache
+*.log
+node_modules/
