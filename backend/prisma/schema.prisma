@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  passwordHash String
+  credits     Int      @default(5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  imageHistory ImageHistory[]
+  payments     Payment[]
+
+  @@map("users")
+}
+
+model ImageHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  prompt    String
+  imageUrl  String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("image_history")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  userId        String
+  stripePaymentId String     @unique
+  amount        Int
+  credits       Int
+  status        String @default("PENDING")
+  createdAt     DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("payments")
+}
