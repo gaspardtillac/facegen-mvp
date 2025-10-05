@@ -23,3 +23,4 @@ backend/dev.db-journal
 *.db-journal
 backend/prisma/dev.db
 backend/prisma/dev.db-journal
+backend/railway-env.txt
