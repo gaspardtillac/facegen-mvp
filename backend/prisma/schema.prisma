@@ -3,20 +3,21 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+provider = "sqlite"
+url      = env("DATABASE_URL")
 }
 
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  passwordHash String
-  credits     Int      @default(5)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  imageHistory ImageHistory[]
-  payments     Payment[]
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  credits       Int            @default(5)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  imageHistory  ImageHistory[]
+  payments      Payment[]
+  videoTasks    VideoTask[]
 
   @@map("users")
 }
@@ -27,22 +28,34 @@ model ImageHistory {
   prompt    String
   imageUrl  String
   createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 
   @@map("image_history")
 }
 
 model Payment {
-  id            String        @id @default(cuid())
-  userId        String
-  stripePaymentId String     @unique
-  amount        Int
-  credits       Int
-  status        String @default("PENDING")
-  createdAt     DateTime     @default(now())
-
-  user User @relation(fields: [userId], references: [id])
+  id              String   @id @default(cuid())
+  userId          String
+  stripePaymentId String   @unique
+  amount          Int
+  credits         Int
+  status          String   @default("PENDING")
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
 
   @@map("payments")
+}
+
+model VideoTask {
+  id        String   @id @default(cuid())
+  userId    String
+  taskId    String   @unique
+  prompt    String
+  status    String   @default("pending")
+  videoUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("video_tasks")
 }

@@ -1,784 +1,595 @@
 "use client";
 import React, { useState, useRef, useEffect } from "react";
-import { useSession, signOut } from "next-auth/react";
-import { useRouter } from "next/navigation";
-
-// ——— Types ———
-type HistoryItem = {
-  id: number;
-  imageUrl: string;
-  prompt: string;
-  date: string;
-};
-
-type GenerateResponse = {
-  imageUrl?: string;
-  hasImage?: boolean;
-  working?: boolean;
-  message?: string;
-  shouldRefund?: boolean;
-  error?: string;
-};
+import { apiService } from "./services/apiService";
+import PricingModal from "./components/PricingModal";
 
 export default function FaceGenApp() {
-  const { data: session } = useSession();
-  const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [activeMode, setActiveMode] = useState("faceswap");
+  const [image, setImage] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [prompt, setPrompt] = useState("");
+  const [textPrompt, setTextPrompt] = useState("");
+  const [videoImage, setVideoImage] = useState(null);
+  const [videoPreview, setVideoPreview] = useState(null);
+  const [videoPrompt, setVideoPrompt] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [authData, setAuthData] = useState({ email: "", password: "" });
+  const [showMenu, setShowMenu] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
+  const [history, setHistory] = useState([]);
 
-  const [image, setImage] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState<string>("");
-  const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [credits, setCredits] = useState<number>(3);
-  const [showPricing, setShowPricing] = useState<boolean>(false);
-  const [showAuth, setShowAuth] = useState<boolean>(false);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [showHistory, setShowHistory] = useState<boolean>(false);
-  const [showFullImage, setShowFullImage] = useState<boolean>(false);
-  const [uiError, setUiError] = useState<string | null>(null);
-  const ref = useRef<HTMLInputElement | null>(null);
+  const ref = useRef(null);
+  const videoRef = useRef(null);
 
   useEffect(() => {
-    if (session) {
-      // Utilisateur connecté : lire depuis la DB (pas de gratuits illimités)
-      fetchCreditsFromDB();
-    } else {
-      // Visiteur anonyme : FORCER 3 crédits (migration v2)
-      try {
-        const version = typeof window !== "undefined" ? localStorage.getItem("anon-credits-version") : null;
-        const savedCredits = typeof window !== "undefined" ? localStorage.getItem("anonymous-credits") : null;
-
-        if (version !== "v2") {
-          // Réinitialise pour tous les anciens utilisateurs (ex: 79) → 3
-          setCredits(3);
-          if (typeof window !== "undefined") {
-            localStorage.setItem("anonymous-credits", "3");
-            localStorage.setItem("anon-credits-version", "v2");
-          }
-        } else {
-          const parsed = parseInt(savedCredits ?? "3", 10);
-          const normalized = Number.isFinite(parsed) ? Math.min(3, Math.max(0, parsed)) : 3;
-          setCredits(normalized);
-          if (typeof window !== "undefined") {
-            localStorage.setItem("anonymous-credits", normalized.toString());
-          }
-        }
-      } catch {
-        setCredits(3);
-        if (typeof window !== "undefined") {
-          localStorage.setItem("anonymous-credits", "3");
-          localStorage.setItem("anon-credits-version", "v2");
-        }
-      }
-    }
+    checkAuth();
+  }, []);
+useEffect(() => {
+  if (showHistory && user) {
     loadHistory();
-  }, [session]);
+  }
+}, [showHistory, user]);
+  useEffect(() => {
+    if (showHistory && user) {
+      loadHistory();
+    }
+  }, [showHistory, user]);
 
-  const fetchCreditsFromDB = async () => {
+  const checkAuth = async () => {
     try {
-      const res = await fetch("/api/credits");
-      if (!res.ok) throw new Error("Impossible de récupérer les crédits");
-      const data = await res.json();
-      setCredits(data.credits);
+      const userData = await apiService.getProfile();
+      setUser(userData.user);
     } catch (error) {
-      console.error("Erreur crédits:", error);
+      console.log("Non connecté");
     }
   };
 
-  const loadHistory = () => {
-    try {
-      const saved = typeof window !== "undefined" ? localStorage.getItem("facegen-history") : null;
-      if (saved) setHistory(JSON.parse(saved));
-    } catch (error) {
-      console.log("Erreur localStorage:", error);
+  const upload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setPreview(e.target.result);
+      reader.readAsDataURL(file);
     }
   };
 
-  const saveToHistory = (imageUrl: string, prompt: string) => {
-    try {
-      const newItem: HistoryItem = {
-        id: Date.now(),
-        imageUrl,
-        prompt,
-        date: new Date().toLocaleDateString("fr-FR"),
-      };
-      const newHistory = [newItem, ...history].slice(0, 18);
-      setHistory(newHistory);
-      if (typeof window !== "undefined") localStorage.setItem("facegen-history", JSON.stringify(newHistory));
-    } catch (error) {
-      console.log("LocalStorage plein, on ignore:", error);
+  const uploadVideo = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setVideoImage(file);
+      const reader = new FileReader();
+      reader.onload = (e) => setVideoPreview(e.target.result);
+      reader.readAsDataURL(file);
     }
   };
 
-  const buyCredits = async (amount: number) => {
-    if (!session) return setShowAuth(true);
+  const handleAuth = async (e) => {
+    e.preventDefault();
     try {
-      const res = await fetch("/api/payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credits: amount }),
-      });
-      const data = await res.json();
-      if (data.url) window.location.href = data.url;
-      else throw new Error("Lien de paiement indisponible");
-    } catch (error: any) {
-      alert("Erreur paiement: " + (error?.message || "inconnue"));
-    }
-  };
-
-  const upload: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = (event.target?.result as string) || null;
-      setImage(dataUrl);
-      setPreview(URL.createObjectURL(file));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Remboursement (si génération KO)
-  const ensureRefund = async () => {
-    try {
-      if (session) {
-        const refundRes = await fetch("/api/credits", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "refund" }),
-        });
-        if (refundRes.ok) {
-          const refundData = await refundRes.json();
-          setCredits(refundData.remaining);
-        }
+      let userData;
+      if (authMode === "login") {
+        userData = await apiService.login(authData.email, authData.password);
       } else {
-        // Anonyme : on rend 1 crédit (toujours borné à 3 max)
-        const newCredits = Math.min(3, credits + 1);
-        setCredits(newCredits);
-        if (typeof window !== "undefined") localStorage.setItem("anonymous-credits", newCredits.toString());
+        userData = await apiService.register(authData.email, authData.password);
       }
-    } catch {
-      console.warn("Remboursement non appliqué (silent)");
+      setUser(userData.user);
+      setShowAuth(false);
+      setAuthData({ email: "", password: "" });
+    } catch (error) {
+      alert(error.message);
     }
   };
 
-  // Débite 1 crédit avant la génération
-  const chargeOneCredit = async () => {
-    if (session) {
-      const creditRes = await fetch("/api/credits", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "use" }),
-      });
-      if (!creditRes.ok) throw new Error("Pas assez de crédits");
-      const creditData = await creditRes.json();
-      setCredits(creditData.remaining);
-    } else {
-      const newCredits = credits - 1;
-      if (newCredits < 0) throw new Error("Pas assez de crédits");
-      setCredits(newCredits);
-      if (typeof window !== "undefined") localStorage.setItem("anonymous-credits", newCredits.toString());
-    }
+  const logout = () => {
+    apiService.logout();
+    setUser(null);
+    setShowMenu(false);
   };
 
-  const generate = async () => {
-    setUiError(null);
-    setResult(null);
-
-    if (!image) return setUiError("Merci d'uploader une photo claire (visage bien visible).");
-    if (!prompt.trim()) return setUiError("Merci de décrire le style souhaité.");
-    if (credits <= 0) return setShowPricing(true);
-
-    setLoading(true);
-
-    try {
-      // 1) Débiter 1 crédit
-      await chargeOneCredit();
-
-      // 2) Appeler l'API de génération
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ faceImage: image, prompt }),
-      });
-
-      if (!res.ok) {
-        await ensureRefund(); // on rembourse si erreur HTTP
-        throw new Error(`Génération indisponible (code ${res.status})`);
-      }
-
-      const data: GenerateResponse = await res.json();
-
-      // Succès si imageUrl présent (compat hasImage/working)
-      const validImageUrl = typeof data.imageUrl === "string" && data.imageUrl.length > 0;
-      const hasValidImage = validImageUrl || (!!data.hasImage && !!data.imageUrl) || (!!data.working && !!data.imageUrl);
-
-      if (!hasValidImage) {
-        if (data.shouldRefund !== false) await ensureRefund();
-        setResult({
-          hasImage: false,
-          message: data.message || data.error || "La génération n'a pas abouti. Réessayez avec un autre prompt ou une photo plus nette.",
-        });
-        return;
-      }
-
-      // Succès
-      saveToHistory(data.imageUrl!, prompt);
-      setResult({ hasImage: true, imageUrl: data.imageUrl!, message: data.message || "Avatar généré avec succès !" });
-    } catch (error: any) {
-      console.error("Erreur generate():", error);
-      setResult({ hasImage: false, message: error?.message || "Erreur lors de la génération" });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const downloadImage = (imageUrl: string, filename: string | null = null) => {
-    const link = document.createElement("a");
-    link.href = imageUrl;
-    link.download = filename || `mon-avatar-ia-${Date.now()}.png`;
+  const downloadImage = (url) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'generated-image.jpg';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const handleCreateAccount = () => router.push("/auth");
+  const generateFaceSwap = async () => {
+    if (!user) {
+      setShowAuth(true);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64 = reader.result.split(',')[1];
+          const response = await apiService.generateImage(prompt, base64, image.type);
+          
+          setResult({
+            hasImage: response.success,
+            imageUrl: response.success ? response.imageUrl : null,
+            message: response.message,
+            type: 'faceswap'
+          });
+          
+          if (response.success) {
+            loadHistory();
+          }
+        } catch (error) {
+          setResult({
+            hasImage: false,
+            imageUrl: null,
+            message: error.message,
+            type: 'faceswap'
+          });
+        }
+        setLoading(false);
+      };
+      reader.readAsDataURL(image);
+    } catch (error) {
+      setResult({
+        hasImage: false,
+        imageUrl: null,
+        message: "Erreur lors de la génération",
+        type: 'faceswap'
+      });
+      setLoading(false);
+    }
+  };
+
+  const generateTextToImage = async () => {
+    if (!user) {
+      setShowAuth(true);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await apiService.generateTextToImage(textPrompt);
+      
+      setResult({
+        hasImage: response.success,
+        imageUrl: response.success ? response.imageUrl : null,
+        message: response.message,
+        type: 'texttoimage'
+      });
+      
+      if (response.success) {
+        loadHistory();
+      }
+    } catch (error) {
+      setResult({
+        hasImage: false,
+        imageUrl: null,
+        message: error.message,
+        type: 'texttoimage'
+      });
+    }
+    setLoading(false);
+  };
+
+  const generateImageToVideo = async () => {
+    if (!user) {
+      setShowAuth(true);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64 = reader.result.split(',')[1];
+          const response = await apiService.generateImageToVideo(videoPrompt, base64, videoImage.type);
+          
+          setResult({
+            hasImage: response.success,
+            imageUrl: response.success ? response.videoUrl : null,
+            message: response.message,
+            type: 'imagetovideo'
+          });
+          
+          if (response.success) {
+            loadHistory();
+          }
+        } catch (error) {
+          setResult({
+            hasImage: false,
+            imageUrl: null,
+            message: error.message,
+            type: 'imagetovideo'
+          });
+        }
+        setLoading(false);
+      };
+      reader.readAsDataURL(videoImage);
+    } catch (error) {
+      setResult({
+        hasImage: false,
+        imageUrl: null,
+        message: "Erreur lors de la génération vidéo",
+        type: 'imagetovideo'
+      });
+      setLoading(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    try {
+      const response = await apiService.getHistory();
+      setHistory(response.history || []);
+    } catch (error) {
+      console.error("Erreur chargement historique:", error);
+    }
+  };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background:
-          "linear-gradient(135deg, rgba(102, 126, 234, 0.8) 0%, rgba(118, 75, 162, 0.9) 50%, rgba(55, 48, 163, 1) 100%)",
-        position: "relative",
-      }}
-    >
-      <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "20px", position: "relative", zIndex: 1 }}>
-        {/* ——— Topbar ——— */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: "40px",
-            background: "rgba(255, 255, 255, 0.1)",
-            backdropFilter: "blur(15px)",
-            padding: "15px 25px",
-            borderRadius: "20px",
-            border: "1px solid rgba(255, 255, 255, 0.2)",
-          }}
-        >
-          <h1
-            style={{
-              fontSize: "2rem",
-              fontWeight: 900,
-              color: "white",
-              textShadow: "0 2px 4px rgba(0,0,0,0.3)",
-              margin: 0,
-            }}
-          >
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", padding: "20px" }}>
+      <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "40px", background: "rgba(255, 255, 255, 0.95)", borderRadius: "25px", padding: "20px 30px" }}>
+          <h1 style={{ fontSize: "2.5rem", fontWeight: "800", background: "linear-gradient(135deg, #667eea, #764ba2)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", margin: 0 }}>
             MonAvatarIA
           </h1>
-
-          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-            <button
-              onClick={() => router.push("/exemples")}
-              style={{
-                background: "rgba(255,255,255,0.2)",
-                color: "white",
-                border: "1px solid rgba(255,255,255,0.3)",
-                padding: "8px 16px",
-                borderRadius: "15px",
-                cursor: "pointer",
-                fontSize: "0.9rem",
-                fontWeight: 500,
-              }}
-            >
-              Galerie
-            </button>
-
-            <button
-              onClick={() => setShowHistory(true)}
-              style={{
-                background: "rgba(255,255,255,0.2)",
-                color: "white",
-                border: "1px solid rgba(255,255,255,0.3)",
-                padding: "8px 16px",
-                borderRadius: "15px",
-                cursor: "pointer",
-                fontSize: "0.9rem",
-                fontWeight: 500,
-              }}
-            >
-              Historique ({history.length})
-            </button>
-
-            <div
-              style={{
-                background: "rgba(255,255,255,0.2)",
-                padding: "8px 16px",
-                borderRadius: "15px",
-                color: "white",
-                display: "flex",
-                gap: "10px",
-                alignItems: "center",
-                fontSize: "0.9rem",
-              }}
-            >
-              <span style={{ fontWeight: 600 }}>
-                {credits} crédit{credits > 1 ? "s" : ""}
-                {credits === 3 && !session && (
-                  <span style={{ fontSize: "0.7rem", opacity: 0.8 }}> gratuits</span>
-                )}
-              </span>
-              <button
-                onClick={() => setShowPricing(true)}
-                style={{
-                  background: "#48bb78",
-                  color: "white",
-                  border: "none",
-                  padding: "4px 12px",
-                  borderRadius: "10px",
-                  cursor: "pointer",
-                  fontSize: "0.8rem",
-                  fontWeight: 600,
-                }}
-              >
-                +
-              </button>
-            </div>
-
-            {session ? (
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                <div
-                  style={{
-                    color: "white",
-                    fontSize: "0.8rem",
-                    background: "rgba(255,255,255,0.2)",
-                    padding: "6px 12px",
-                    borderRadius: "12px",
-                    maxWidth: "100px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
+          
+          <div style={{ display: "flex", gap: "15px", alignItems: "center" }}>
+            {user ? (
+              <div style={{ position: "relative" }}>
+                <button 
+                  onClick={() => setShowMenu(!showMenu)}
+                  style={{ background: "#48bb78", color: "white", border: "none", padding: "12px 20px", borderRadius: "12px", cursor: "pointer", fontSize: "1rem", fontWeight: "600" }}
                 >
-                  {session.user?.name?.split(" ")[0] || session.user?.email?.split("@")[0]}
-                </div>
-                <button
-                  onClick={() => signOut()}
-                  style={{
-                    background: "rgba(239, 68, 68, 0.3)",
-                    color: "white",
-                    border: "none",
-                    padding: "6px 12px",
-                    borderRadius: "12px",
-                    cursor: "pointer",
-                    fontSize: "0.8rem",
-                  }}
-                >
-                  ↗
+                  {user.email} ({user.credits || 0} crédits)
                 </button>
+                {showMenu && (
+                  <div style={{ position: "absolute", top: "100%", right: 0, background: "white", border: "2px solid #e2e8f0", borderRadius: "12px", padding: "10px", zIndex: 1000, minWidth: "200px" }}>
+                    <button onClick={() => setShowPricing(true)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px", cursor: "pointer", borderRadius: "8px" }}>
+                      Acheter des crédits
+                    </button>
+                    <button onClick={() => { setShowHistory(true); setShowMenu(false); }} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px", cursor: "pointer", borderRadius: "8px" }}>
+                      Mes générations
+                    </button>
+                    <button onClick={logout} style={{ width: "100%", textAlign: "left", background: "none", border: "none", padding: "10px", cursor: "pointer", borderRadius: "8px", color: "#ef4444" }}>
+                      Se déconnecter
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
-              <button
-                onClick={handleCreateAccount}
-                style={{
-                  background: "rgba(255,255,255,0.2)",
-                  color: "white",
-                  border: "1px solid rgba(255,255,255,0.3)",
-                  padding: "8px 16px",
-                  borderRadius: "15px",
-                  cursor: "pointer",
-                  fontSize: "0.9rem",
-                  fontWeight: 500,
-                }}
+              <button 
+                onClick={() => setShowAuth(true)}
+                style={{ background: "#48bb78", color: "white", border: "none", padding: "12px 24px", borderRadius: "12px", cursor: "pointer", fontSize: "1rem", fontWeight: "600" }}
               >
-                Compte
+                Se connecter
               </button>
             )}
           </div>
         </div>
 
-        {/* ——— Modales ——— */}
-        {showHistory && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: "rgba(0,0,0,0.8)",
-              backdropFilter: "blur(5px)",
-              zIndex: 1000,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div
+        {showMenu && (
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }} onClick={() => setShowMenu(false)} />
+        )}
+
+        <div style={{ 
+          background: "rgba(255, 255, 255, 0.95)", 
+          borderRadius: "25px", 
+          padding: "30px",
+          marginBottom: "40px"
+        }}>
+          <div style={{ display: "flex", gap: "15px", justifyContent: "center", flexWrap: "wrap" }}>
+            <button
+              onClick={() => setActiveMode("faceswap")}
               style={{
-                background: "white",
-                padding: "40px",
-                borderRadius: "25px",
-                maxWidth: "800px",
-                width: "90%",
-                maxHeight: "80vh",
-                overflow: "auto",
+                padding: "15px 25px",
+                borderRadius: "15px",
+                border: "none",
+                background: activeMode === "faceswap" ? "#48bb78" : "#f1f5f9",
+                color: activeMode === "faceswap" ? "white" : "#64748b",
+                fontSize: "1.1rem",
+                fontWeight: "600",
+                cursor: "pointer"
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "30px" }}>
-                <h2 style={{ margin: 0 }}>Votre historique ({history.length})</h2>
-                <button
-                  onClick={() => setShowHistory(false)}
-                  style={{ background: "#f1f5f9", border: "none", padding: "8px 16px", borderRadius: "12px", cursor: "pointer", fontSize: "0.9rem" }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              {history.length === 0 ? (
-                <div style={{ textAlign: "center", color: "#64748b", padding: "40px" }}>
-                  <p>Aucune génération dans votre historique</p>
-                  <p style={{ fontSize: "0.9rem" }}>Vos avatars générés apparaîtront ici</p>
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: "20px" }}>
-                  {history.map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "15px",
-                        padding: "20px",
-                        display: "flex",
-                        gap: "20px",
-                        alignItems: "center",
-                      }}
-                    >
-                      <img src={item.imageUrl} style={{ width: 80, height: 80, borderRadius: "12px", objectFit: "cover" }} alt="Avatar généré" />
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontWeight: 600, marginBottom: 8, color: "#1a202c" }}>
-                          "{item.prompt}"
-                        </p>
-                        <p style={{ fontSize: "0.9rem", color: "#64748b", margin: 0 }}>Généré le {item.date}</p>
-                      </div>
-                      <button
-                        onClick={() => downloadImage(item.imageUrl, `avatar-${item.date}`)}
-                        style={{ background: "#48bb78", color: "white", border: "none", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: "0.9rem" }}
-                      >
-                        ↓
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {showFullImage && result?.imageUrl && (
-          <div
-            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.95)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
-            onClick={() => setShowFullImage(false)}
-          >
-            <div style={{ maxWidth: "90vw", maxHeight: "90vh", textAlign: "center" }}>
-              <img src={result.imageUrl} style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: "12px" }} alt="Avatar généré" />
-              <p style={{ color: "white", marginTop: 20 }}>Cliquez pour fermer</p>
-            </div>
-          </div>
-        )}
-
-        {showAuth && (
-          <div
-            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(5px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
-          >
-            <div style={{ background: "white", padding: 40, borderRadius: 25, maxWidth: 500, width: "90%", textAlign: "center" }}>
-              <h2 style={{ marginBottom: 20 }}>Créer un compte pour acheter</h2>
-              <p style={{ marginBottom: 30, color: "#64748b" }}>Pour acheter des crédits et sauvegarder votre historique, vous devez créer un compte gratuit.</p>
-              <div style={{ display: "flex", gap: 15, justifyContent: "center" }}>
-                <button onClick={handleCreateAccount} style={{ padding: "15px 30px", background: "#48bb78", color: "white", border: "none", borderRadius: 12, cursor: "pointer" }}>
-                  Créer un compte
-                </button>
-                <button onClick={() => setShowAuth(false)} style={{ padding: "15px 30px", background: "#f1f5f9", border: "none", borderRadius: 12, cursor: "pointer" }}>
-                  Annuler
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showPricing && (
-          <div
-            style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(5px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
-          >
-            <div style={{ background: "white", padding: 40, borderRadius: 25, maxWidth: 700, width: "90%" }}>
-              <h2 style={{ textAlign: "center", marginBottom: 30 }}>Packs de crédits</h2>
-
-              {!session && (
-                <div style={{ background: "#fef3c7", padding: 20, borderRadius: 15, marginBottom: 25, textAlign: "center" }}>
-                  <h4 style={{ margin: "0 0 8px 0", color: "#92400e" }}>Créez un compte pour acheter des crédits</h4>
-                  <p style={{ margin: 0, fontSize: "0.9rem", color: "#92400e" }}>Les crédits achetés seront sauvegardés dans votre compte</p>
-                </div>
-              )}
-
-              {credits === 0 && !session && (
-                <div style={{ background: "#f0f9ff", padding: 20, borderRadius: 15, marginBottom: 25, textAlign: "center" }}>
-                  <h4 style={{ margin: "0 0 8px 0", color: "#0369a1" }}>Crédits gratuits épuisés</h4>
-                  <p style={{ margin: 0, fontSize: "0.9rem", color: "#0369a1" }}>
-                    Vous avez utilisé vos 3 crédits gratuits. Achetez des crédits pour continuer à générer des avatars !
-                  </p>
-                </div>
-              )}
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 20 }}>
-                <div style={{ border: "2px solid #667eea", padding: 25, borderRadius: 18, textAlign: "center" }}>
-                  <h3 style={{ margin: "0 0 10px 0" }}>Pack Starter</h3>
-                  <div style={{ fontSize: "2.5rem", fontWeight: "bold", color: "#667eea", margin: "10px 0" }}>2€</div>
-                  <div style={{ marginBottom: 15 }}>10 crédits</div>
-                  <button onClick={() => buyCredits(10)} style={{ width: "100%", padding: "12px 20px", background: "#667eea", color: "white", border: "none", borderRadius: 12, cursor: "pointer" }}>
-                    Acheter
-                  </button>
-                </div>
-
-                <div style={{ border: "2px solid #48bb78", padding: 25, borderRadius: 18, textAlign: "center", position: "relative" }}>
-                  <div style={{ position: "absolute", top: -12, right: 15, background: "#48bb78", color: "white", padding: "8px 15px", borderRadius: 15, fontSize: "0.8rem" }}>POPULAIRE</div>
-                  <h3 style={{ margin: "0 0 10px 0" }}>Pack Pro</h3>
-                  <div style={{ fontSize: "2.5rem", fontWeight: "bold", color: "#48bb78", margin: "10px 0" }}>5€</div>
-                  <div style={{ marginBottom: 15 }}>30 crédits</div>
-                  <button onClick={() => buyCredits(30)} style={{ width: "100%", padding: "12px 20px", background: "#48bb78", color: "white", border: "none", borderRadius: 12, cursor: "pointer" }}>
-                    Acheter
-                  </button>
-                </div>
-
-                <div style={{ border: "2px solid #8b5cf6", padding: 25, borderRadius: 18, textAlign: "center", position: "relative" }}>
-                  <div style={{ position: "absolute", top: -12, right: 15, background: "#8b5cf6", color: "white", padding: "8px 15px", borderRadius: 15, fontSize: "0.8rem" }}>MEILLEURE VALEUR</div>
-                  <h3 style={{ margin: "0 0 10px 0" }}>Pack Premium</h3>
-                  <div style={{ fontSize: "2.5rem", fontWeight: "bold", color: "#8b5cf6", margin: "10px 0" }}>10€</div>
-                  <div style={{ marginBottom: 15 }}>70 crédits</div>
-                  <button onClick={() => buyCredits(70)} style={{ width: "100%", padding: "12px 20px", background: "#8b5cf6", color: "white", border: "none", borderRadius: 12, cursor: "pointer" }}>
-                    Acheter
-                  </button>
-                </div>
-              </div>
-
-              <button onClick={() => setShowPricing(false)} style={{ marginTop: 25, width: "100%", padding: 12, background: "#f1f5f9", border: "none", borderRadius: 12, cursor: "pointer" }}>
-                Fermer
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ——— Grille principale ——— */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, alignItems: "start" }}>
-          {/* ——— Colonne gauche : Exemple ——— */}
-          <div
-            style={{
-              background: "rgba(255, 255, 255, 0.95)",
-              backdropFilter: "blur(20px)",
-              borderRadius: 25,
-              padding: 40,
-              boxShadow: "0 25px 50px rgba(0, 0, 0, 0.1)",
-            }}
-          >
-            <div style={{ textAlign: "center", marginBottom: 30 }}>
-              <h2 style={{ fontSize: "1.6rem", fontWeight: 600, color: "#1a202c", marginBottom: 10 }}>Exemple de transformation</h2>
-              <p style={{ color: "#64748b", fontSize: "0.95rem" }}>Découvrez ce que MonAvatarIA peut créer pour vous</p>
-            </div>
-
-            <div style={{ display: "flex", gap: 20, marginBottom: 25, alignItems: "center", justifyContent: "center" }}>
-              <div style={{ textAlign: "center" }}>
-                <p style={{ fontSize: "0.9rem", color: "#64748b", marginBottom: 10, fontWeight: 500 }}>Photo originale</p>
-                <img
-                  src="/images/example-original.jpg"
-                  alt="Photo originale"
-                  style={{ width: 100, height: 100, borderRadius: 15, objectFit: "cover", border: "2px solid #e2e8f0" }}
-                />
-              </div>
-              <div style={{ fontSize: "1.5rem", color: "#48bb78", fontWeight: "bold" }}>→</div>
-              <div style={{ textAlign: "center" }}>
-                <p style={{ fontSize: "0.9rem", color: "#64748b", marginBottom: 10, fontWeight: 500 }}>Avatar généré</p>
-                <img
-                  src="/images/example-generated.jpg"
-                  alt="Avatar généré dans un café parisien"
-                  style={{ width: 100, height: 100, borderRadius: 15, objectFit: "cover", border: "2px solid #48bb78", boxShadow: "0 4px 12px rgba(72, 187, 120, 0.3)" }}
-                />
-              </div>
-            </div>
-
-            <div style={{ background: "#f8fafc", padding: 20, borderRadius: 15, border: "1px solid #e2e8f0", marginBottom: 20 }}>
-              <p style={{ fontSize: "0.85rem", color: "#475569", fontWeight: 600, marginBottom: 8 }}>Prompt utilisé :</p>
-              <p style={{ fontSize: "0.9rem", color: "#334155", fontStyle: "italic", lineHeight: 1.4, margin: 0 }}>
-                "dans un café parisien, costume élégant, éclairage naturel, style professionnel"
-              </p>
-            </div>
-
+              Avatar Personnalisé
+            </button>
             <button
-              onClick={() => router.push("/exemples")}
-              style={{ width: "100%", padding: 12, background: "linear-gradient(135deg, #667eea 0%, #5a67d8 100%)", color: "white", border: "none", borderRadius: 12, cursor: "pointer", fontWeight: 500 }}
+              onClick={() => setActiveMode("texttoimage")}
+              style={{
+                padding: "15px 25px",
+                borderRadius: "15px",
+                border: "none",
+                background: activeMode === "texttoimage" ? "#48bb78" : "#f1f5f9",
+                color: activeMode === "texttoimage" ? "white" : "#64748b",
+                fontSize: "1.1rem",
+                fontWeight: "600",
+                cursor: "pointer"
+              }}
             >
-              Voir plus d'exemples
+              Génération d'Images
+            </button>
+            <button
+              onClick={() => setActiveMode("imagetovideo")}
+              style={{
+                padding: "15px 25px",
+                borderRadius: "15px",
+                border: "none",
+                background: activeMode === "imagetovideo" ? "#48bb78" : "#f1f5f9",
+                color: activeMode === "imagetovideo" ? "white" : "#64748b",
+                fontSize: "1.1rem",
+                fontWeight: "600",
+                cursor: "pointer"
+              }}
+            >
+              Génération de Vidéos
             </button>
           </div>
+        </div>
 
-          {/* ——— Colonne droite : Génération ——— */}
-          <div
-            style={{
-              background: "rgba(255, 255, 255, 0.95)",
-              backdropFilter: "blur(20px)",
-              borderRadius: 25,
-              padding: 40,
-              boxShadow: "0 25px 50px rgba(0, 0, 0, 0.1)",
-            }}
-          >
-            <div style={{ textAlign: "center", marginBottom: 30 }}>
-              <h2 style={{ fontSize: "1.6rem", fontWeight: 600, color: "#1a202c", marginBottom: 10 }}>Créez votre avatar</h2>
-              <p style={{ color: "#64748b", fontSize: "0.95rem" }}>Uploadez votre photo et décrivez le style souhaité</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "40px" }}>
+          
+          {activeMode === "faceswap" && (
+            <div style={{ background: "rgba(255, 255, 255, 0.95)", borderRadius: "25px", padding: "40px" }}>
+              <h2 style={{ fontSize: "1.6rem", textAlign: "center", marginBottom: "30px" }}>
+                Créez votre avatar
+              </h2>
+
+              <div style={{ marginBottom: "25px" }}>
+                <h3>Votre Photo</h3>
+                <div onClick={() => ref.current?.click()} style={{ border: "3px dashed #e2e8f0", borderRadius: "15px", padding: "30px", textAlign: "center", cursor: "pointer", minHeight: "180px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {preview ? (
+                    <img src={preview} style={{ maxHeight: "120px", borderRadius: "12px" }} />
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: "3rem" }}>📸</div>
+                      <p>Cliquez pour uploader</p>
+                    </div>
+                  )}
+                </div>
+                <input ref={ref} type="file" accept="image/*" onChange={upload} style={{ display: "none" }} />
+              </div>
+
+              <div style={{ marginBottom: "25px" }}>
+                <h3>Description</h3>
+                <textarea 
+                  value={prompt} 
+                  onChange={(e) => setPrompt(e.target.value)} 
+                  placeholder="dans un café parisien, en costume élégant..." 
+                  style={{ width: "100%", height: "100px", padding: "15px", border: "2px solid #e2e8f0", borderRadius: "12px", resize: "none" }}
+                />
+              </div>
+              
+              <button 
+                onClick={generateFaceSwap} 
+                disabled={!image || !prompt || loading || !user} 
+                style={{ 
+                  width: "100%", 
+                  padding: "15px", 
+                  fontSize: "1.1rem", 
+                  background: loading ? "#a0aec0" : !user ? "#ef4444" : "#48bb78", 
+                  color: "white", 
+                  border: "none", 
+                  borderRadius: "12px", 
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontWeight: "600"
+                }}
+              >
+                {loading ? "Création en cours..." : !user ? "Se connecter pour générer" : "Créer mon avatar (1 crédit)"}
+              </button>
             </div>
+          )}
 
-            {credits === 3 && !session && (
-              <div
-                style={{
-                  background: "#f0f9ff",
-                  padding: 15,
-                  borderRadius: 12,
-                  marginBottom: 20,
-                  textAlign: "center",
-                  border: "1px solid #bfdbfe",
+          {activeMode === "texttoimage" && (
+            <div style={{ background: "rgba(255, 255, 255, 0.95)", borderRadius: "25px", padding: "40px" }}>
+              <h2 style={{ fontSize: "1.6rem", textAlign: "center", marginBottom: "30px" }}>
+                Générez n'importe quelle image
+              </h2>
+
+              <div style={{ marginBottom: "25px" }}>
+                <h3>Description de l'image</h3>
+                <textarea 
+                  value={textPrompt} 
+                  onChange={(e) => setTextPrompt(e.target.value)} 
+                  placeholder="Un paysage de montagne au coucher du soleil..." 
+                  style={{ width: "100%", height: "150px", padding: "15px", border: "2px solid #e2e8f0", borderRadius: "12px", resize: "none" }}
+                />
+                <p style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "10px" }}>
+                  Exemples: "Un chat robot futuriste", "Une forêt magique la nuit", "Portrait d'un astronaute"
+                </p>
+              </div>
+              
+              <button 
+                onClick={generateTextToImage} 
+                disabled={!textPrompt || loading || !user} 
+                style={{ 
+                  width: "100%", 
+                  padding: "15px", 
+                  fontSize: "1.1rem", 
+                  background: loading ? "#a0aec0" : !user ? "#ef4444" : "#48bb78", 
+                  color: "white", 
+                  border: "none", 
+                  borderRadius: "12px", 
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontWeight: "600"
                 }}
               >
-                <p style={{ fontSize: "0.9rem", color: "#0369a1", fontWeight: 600, margin: 0 }}>🎉 3 crédits gratuits offerts ! Testez maintenant</p>
-              </div>
-            )}
+                {loading ? "Génération en cours..." : !user ? "Se connecter pour générer" : "Générer l'image (1 crédit)"}
+              </button>
+            </div>
+          )}
 
-            {uiError && (
-              <div style={{ background: "#fef2f2", border: "2px solid #ef4444", color: "#7f1d1d", borderRadius: 12, padding: 12, marginBottom: 16 }}>
-                {uiError}
-              </div>
-            )}
+          {activeMode === "imagetovideo" && (
+            <div style={{ background: "rgba(255, 255, 255, 0.95)", borderRadius: "25px", padding: "40px" }}>
+              <h2 style={{ fontSize: "1.6rem", textAlign: "center", marginBottom: "30px" }}>
+                Transformez une image en vidéo
+              </h2>
 
-            <div style={{ marginBottom: 25 }}>
-              <h3 style={{ marginBottom: 15, fontSize: "1.1rem" }}>Votre Photo</h3>
-              <div
-                onClick={() => ref.current?.click()}
-                style={{
-                  border: "3px dashed #e2e8f0",
-                  borderRadius: 15,
-                  padding: 30,
-                  textAlign: "center",
-                  cursor: "pointer",
-                  minHeight: 180,
-                  transition: "all 0.3s ease",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+              <div style={{ marginBottom: "25px" }}>
+                <h3>Image à animer</h3>
+                <div onClick={() => videoRef.current?.click()} style={{ border: "3px dashed #e2e8f0", borderRadius: "15px", padding: "30px", textAlign: "center", cursor: "pointer", minHeight: "180px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {videoPreview ? (
+                    <img src={videoPreview} style={{ maxHeight: "120px", borderRadius: "12px" }} />
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: "3rem" }}>🎬</div>
+                      <p>Cliquez pour uploader une image</p>
+                    </div>
+                  )}
+                </div>
+                <input ref={videoRef} type="file" accept="image/*" onChange={uploadVideo} style={{ display: "none" }} />
+              </div>
+
+              <div style={{ marginBottom: "25px" }}>
+                <h3>Description du mouvement</h3>
+                <textarea 
+                  value={videoPrompt} 
+                  onChange={(e) => setVideoPrompt(e.target.value)} 
+                  placeholder="La personne sourit et fait un clin d'œil..." 
+                  style={{ width: "100%", height: "120px", padding: "15px", border: "2px solid #e2e8f0", borderRadius: "12px", resize: "none" }}
+                />
+                <p style={{ fontSize: "0.8rem", color: "#64748b", marginTop: "10px" }}>
+                  Exemples: "Les feuilles bougent dans le vent", "La personne tourne la tête", "L'eau coule"
+                </p>
+              </div>
+              
+              <button 
+                onClick={generateImageToVideo} 
+                disabled={!videoImage || !videoPrompt || loading || !user} 
+                style={{ 
+                  width: "100%", 
+                  padding: "15px", 
+                  fontSize: "1.1rem", 
+                  background: loading ? "#a0aec0" : !user ? "#ef4444" : "#48bb78", 
+                  color: "white", 
+                  border: "none", 
+                  borderRadius: "12px", 
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontWeight: "600"
                 }}
               >
-                {preview ? (
-                  <img src={preview} style={{ maxHeight: 120, borderRadius: 12 }} alt="Prévisualisation" />
+                {loading ? "Génération en cours..." : !user ? "Se connecter pour générer" : "Générer la vidéo (2 crédits)"}
+              </button>
+            </div>
+          )}
+
+          <div style={{ background: "rgba(255, 255, 255, 0.95)", borderRadius: "25px", padding: "40px" }}>
+            {result ? (
+              <div style={{ textAlign: "center", padding: "20px", background: result.hasImage ? "#f0fdf4" : "#fef2f2", border: `2px solid ${result.hasImage ? "#48bb78" : "#ef4444"}`, borderRadius: "15px" }}>
+                {result.hasImage && result.imageUrl ? (
+                  <div>
+                    <h3 style={{ color: "#065f46", marginBottom: "15px" }}>
+                      {result.type === 'faceswap' ? 'Avatar généré !' : 
+                       result.type === 'texttoimage' ? 'Image générée !' : 
+                       'Vidéo générée !'}
+                    </h3>
+                    {result.type === 'imagetovideo' ? (
+                      <video 
+                        src={result.imageUrl} 
+                        controls 
+                        style={{ maxWidth: "200px", borderRadius: "15px", marginBottom: "15px" }}
+                      />
+                    ) : (
+                      <img src={result.imageUrl} style={{ maxWidth: "200px", borderRadius: "15px", marginBottom: "15px" }} />
+                    )}
+                    <br />
+                    <button onClick={() => downloadImage(result.imageUrl)} style={{ background: "#48bb78", color: "white", border: "none", padding: "12px 24px", borderRadius: "10px", cursor: "pointer", fontSize: "1rem", fontWeight: "600" }}>
+                      Télécharger
+                    </button>
+                  </div>
                 ) : (
                   <div>
-                    <div style={{ fontSize: "3rem", marginBottom: 10 }}>📸</div>
-                    <p style={{ fontSize: "0.9rem" }}>Cliquez pour uploader</p>
+                    <h3 style={{ color: "#dc2626", marginBottom: "15px" }}>Génération échouée</h3>
+                    <p style={{ color: "#7f1d1d" }}>{result.message}</p>
                   </div>
                 )}
               </div>
-              <input ref={ref} type="file" accept="image/*" onChange={upload} style={{ display: "none" }} />
-            </div>
-
-            <div style={{ marginBottom: 25 }}>
-              <h3 style={{ marginBottom: 15, fontSize: "1.1rem" }}>Description</h3>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="dans un café parisien, en costume élégant..."
-                style={{ width: "100%", height: 100, padding: 15, border: "2px solid #e2e8f0", borderRadius: 12, resize: "none", fontSize: "0.9rem" }}
-              />
-            </div>
-
-            <button
-              onClick={generate}
-              disabled={!image || !prompt || loading}
-              style={{
-                width: "100%",
-                padding: 15,
-                fontSize: "1.1rem",
-                background: loading ? "#a0aec0" : credits > 0 ? "#48bb78" : "#ef4444",
-                color: "white",
-                border: "none",
-                borderRadius: 12,
-                cursor: loading ? "not-allowed" : "pointer",
-                marginBottom: 20,
-                fontWeight: 600,
-              }}
-            >
-              {loading
-                ? "Création en cours..."
-                : credits > 0
-                ? `Créer mon avatar (${credits} crédit${credits > 1 ? "s" : ""} restant${credits > 1 ? "s" : ""})`
-                : "Acheter des crédits"}
-            </button>
-
-            {credits === 0 && (
-              <div
-                style={{
-                  textAlign: "center",
-                  padding: 20,
-                  background: "#fef3c7",
-                  border: "2px solid #f59e0b",
-                  borderRadius: 15,
-                  marginBottom: 20,
-                }}
-              >
-                <h3 style={{ color: "#92400e", marginBottom: 10, fontSize: "1.1rem" }}>Plus de crédits !</h3>
-                <p style={{ color: "#92400e", marginBottom: 15, fontSize: "0.9rem" }}>
-                  Vous avez épuisé vos crédits gratuits. Achetez un pack pour continuer à créer des avatars incroyables !
-                </p>
-                <button onClick={() => setShowPricing(true)} style={{ padding: "10px 20px", background: "#f59e0b", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
-                  Voir les offres
-                </button>
-              </div>
-            )}
-
-            {result && (
-              <div
-                style={{
-                  textAlign: "center",
-                  padding: 20,
-                  background: result?.imageUrl ? "#f0fdf4" : "#fef2f2",
-                  border: `2px solid ${result?.imageUrl ? "#48bb78" : "#ef4444"}`,
-                  borderRadius: 15,
-                }}
-              >
-                {result.imageUrl ? (
-                  <div>
-                    <h3 style={{ color: "#065f46", marginBottom: 15, fontSize: "1.2rem" }}>Avatar généré !</h3>
-                    <div style={{ marginBottom: 15 }}>
-                      <img
-                        src={result.imageUrl}
-                        style={{ maxWidth: 200, maxHeight: 200, borderRadius: 15, cursor: "pointer", transition: "all 0.3s ease" }}
-                        onClick={() => setShowFullImage(true)}
-                        alt="Avatar généré"
-                      />
-                      <p style={{ marginTop: 10, color: "#64748b", fontSize: "0.8rem" }}>Cliquez pour agrandir</p>
+            ) : (
+              <div>
+                <h2 style={{ fontSize: "1.6rem", fontWeight: "600", color: "#1a202c", marginBottom: "30px", textAlign: "center" }}>
+                  {activeMode === "faceswap" ? "Comment ça marche" : 
+                   activeMode === "texttoimage" ? "Conseils pour de meilleures images" :
+                   "Conseils pour de meilleures vidéos"}
+                </h2>
+                
+                {activeMode === "faceswap" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>1</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Uploadez votre photo</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Une photo claire de votre visage</p>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-                      <button onClick={() => downloadImage(result.imageUrl!)} style={{ padding: "10px 20px", background: "#48bb78", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 500, fontSize: "0.9rem" }}>
-                        Télécharger
-                      </button>
-                      <button onClick={() => setResult(null)} style={{ padding: "10px 20px", background: "#6b7280", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontSize: "0.9rem" }}>
-                        Nouveau
-                      </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>2</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Décrivez le style</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Ex: "en costume dans un bureau moderne"</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>3</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Obtenez votre avatar</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Image haute qualité générée par IA</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : activeMode === "texttoimage" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>✨</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Soyez précis</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Plus votre description est détaillée, meilleur sera le résultat</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>🎨</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Mentionnez le style</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Photorealistic, cartoon, painting, etc.</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>💡</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Expérimentez</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Testez différents prompts pour des résultats variés</p>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div>
-                    <h3 style={{ color: "#dc2626", marginBottom: 15 }}>Génération échouée</h3>
-                    <p style={{ color: "#7f1d1d", marginBottom: 15, fontSize: "0.9rem" }}>{result.message}</p>
-                    <button onClick={() => setResult(null)} style={{ padding: "10px 20px", background: "#ef4444", color: "white", border: "none", borderRadius: 8, cursor: "pointer" }}>
-                      Réessayer
-                    </button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>🎬</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Image de qualité</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Utilisez une image nette et bien éclairée</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>⚡</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Mouvement simple</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>Décrivez des mouvements subtils et naturels</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+                      <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#48bb78", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "bold" }}>⏱️</div>
+                      <div>
+                        <h4 style={{ margin: "0 0 5px 0", color: "#1a202c" }}>Patience</h4>
+                        <p style={{ margin: 0, color: "#64748b", fontSize: "0.9rem" }}>La génération vidéo prend plus de temps</p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -786,6 +597,116 @@ export default function FaceGenApp() {
           </div>
         </div>
       </div>
+
+      {showAuth && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "white", padding: "40px", borderRadius: "20px", maxWidth: "400px", width: "90%" }}>
+            <div style={{ display: "flex", marginBottom: "20px" }}>
+              <button 
+                onClick={() => setAuthMode("login")} 
+                style={{ 
+                  flex: 1, 
+                  padding: "10px", 
+                  border: "none", 
+                  background: authMode === "login" ? "#48bb78" : "transparent",
+                  color: authMode === "login" ? "white" : "#64748b",
+                  borderRadius: "8px 0 0 8px",
+                  cursor: "pointer"
+                }}
+              >
+                Connexion
+              </button>
+              <button 
+                onClick={() => setAuthMode("register")} 
+                style={{ 
+                  flex: 1, 
+                  padding: "10px", 
+                  border: "none", 
+                  background: authMode === "register" ? "#48bb78" : "transparent",
+                  color: authMode === "register" ? "white" : "#64748b",
+                  borderRadius: "0 8px 8px 0",
+                  cursor: "pointer"
+                }}
+              >
+                Inscription
+              </button>
+            </div>
+            
+            <form onSubmit={handleAuth}>
+              <input
+                type="email"
+                placeholder="Email"
+                value={authData.email}
+                onChange={(e) => setAuthData(prev => ({ ...prev, email: e.target.value }))}
+                style={{ width: "100%", padding: "12px", marginBottom: "15px", border: "2px solid #e2e8f0", borderRadius: "8px" }}
+                required
+              />
+              <input
+                type="password"
+                placeholder="Mot de passe"
+                value={authData.password}
+                onChange={(e) => setAuthData(prev => ({ ...prev, password: e.target.value }))}
+                style={{ width: "100%", padding: "12px", marginBottom: "20px", border: "2px solid #e2e8f0", borderRadius: "8px" }}
+                required
+              />
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button type="submit" style={{ flex: 1, padding: "12px", background: "#48bb78", color: "white", border: "none", borderRadius: "8px", cursor: "pointer" }}>
+                  {authMode === "login" ? "Se connecter" : "S'inscrire"}
+                </button>
+                <button type="button" onClick={() => setShowAuth(false)} style={{ flex: 1, padding: "12px", background: "#f1f5f9", color: "#64748b", border: "none", borderRadius: "8px", cursor: "pointer" }}>
+                  Annuler
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showHistory && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "white", padding: "40px", borderRadius: "20px", maxWidth: "900px", width: "90%", maxHeight: "80%", overflow: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "30px" }}>
+              <h2>Mes générations</h2>
+              <button onClick={() => setShowHistory(false)} style={{ background: "#f1f5f9", border: "none", padding: "10px 20px", borderRadius: "8px", cursor: "pointer" }}>
+                Fermer
+              </button>
+            </div>
+            
+            {history.length > 0 ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "25px" }}>
+                {history.map((item, index) => (
+                  <div key={index} style={{ border: "2px solid #e2e8f0", borderRadius: "15px", padding: "20px", textAlign: "center" }}>
+                    {item.imageUrl.includes('.mp4') ? (
+                      <video src={item.imageUrl} style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "12px", marginBottom: "15px" }} />
+                    ) : (
+                      <img src={item.imageUrl} style={{ width: "100%", height: "140px", objectFit: "cover", borderRadius: "12px", marginBottom: "15px" }} />
+                    )}
+                    <p style={{ fontSize: "0.85rem", margin: "10px 0" }}>
+                      "{item.prompt.substring(0, 60)}..."
+                    </p>
+                    <button onClick={() => downloadImage(item.imageUrl)} style={{ background: "#48bb78", color: "white", border: "none", padding: "8px 16px", borderRadius: "8px", cursor: "pointer" }}>
+                      Télécharger
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "60px 20px" }}>
+                <div style={{ fontSize: "4rem", marginBottom: "20px" }}>🎨</div>
+                <h3>Aucune génération pour le moment</h3>
+                <p>Créez votre première création pour la voir apparaître ici !</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showPricing && (
+        <PricingModal 
+          isOpen={showPricing} 
+          onClose={() => setShowPricing(false)} 
+        />
+      )}
     </div>
   );
 }

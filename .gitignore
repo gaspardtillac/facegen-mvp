@@ -14,3 +14,7 @@ backend/.env.*
 # Logs et cache
 *.log
 node_modules/
+backend/dev.db
+backend/dev.db-journal
+*.db
+*.db-journal

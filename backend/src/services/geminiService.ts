@@ -1,60 +1,36 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
-export class GeminiService {
-  private model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.5-flash-image-preview' 
-  });
-
-  async generateImage(
-    prompt: string, 
-    imageBase64: string, 
-    mimeType: string
-  ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+export const geminiService = {
+  async generateImage(prompt: string) {
     try {
-      const imagePart = {
-        inlineData: {
-          data: imageBase64,
-          mimeType: mimeType
+      const result = await client.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }]
+        }],
+        config: {
+          responseModalities: ['image']
         }
-      };
-
-      const textPart = {
-        text: `Create a sharp, high-resolution, photorealistic portrait in: ${prompt}. Professional photography, DSLR camera quality, crisp details, natural skin texture, perfect focus, studio lighting, 4K resolution, hyperrealistic`
-      };
-
-      const result = await this.model.generateContent([imagePart, textPart]);
-      const response = await result.response;
+      });
       
-      const candidates = response.candidates;
-      if (!candidates || candidates.length === 0) {
-        throw new Error('Aucune image générée par le modèle');
+      const parts = result.candidates?.[0]?.content?.parts || [];
+      
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          return { 
+            success: true, 
+            text: `data:image/png;base64,${part.inlineData.data}` 
+          };
+        }
       }
-
-      const parts = candidates[0].content.parts;
-      const imagePart2 = parts?.find(part => part.inlineData);
       
-      if (!imagePart2?.inlineData) {
-        throw new Error('Aucune image trouvée dans la réponse');
-      }
-
-      const generatedImageBase64 = imagePart2.inlineData.data;
-      const generatedMimeType = imagePart2.inlineData.mimeType || 'image/png';
-      
-      return {
-        success: true,
-        imageUrl: `data:${generatedMimeType};base64,${generatedImageBase64}`
-      };
-
-    } catch (error) {
-      console.error('Erreur Gemini:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Erreur inconnue'
-      };
+      return { success: false, error: 'No image generated' };
+    } catch (error: any) {
+      console.error('Gemini API error:', error);
+      return { success: false, error: error.message };
     }
   }
-}
-
-export const geminiService = new GeminiService();
+};

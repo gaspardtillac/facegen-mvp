@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const imageController_1 = require("../controllers/imageController");
+const auth_1 = require("../middleware/auth");
+const router = (0, express_1.Router)();
+router.post('/generate', auth_1.authenticate, imageController_1.imageController.generateImage.bind(imageController_1.imageController));
+router.post('/text-to-image', auth_1.authenticate, imageController_1.generateTextToImage);
+router.post('/image-to-video', auth_1.authenticate, imageController_1.generateImageToVideo);
+router.get('/history', auth_1.authenticate, imageController_1.imageController.getHistory.bind(imageController_1.imageController));
+exports.default = router;

@@ -1,103 +1,138 @@
 import { Request, Response } from 'express';
 import prisma from '../config/database';
-import { geminiService } from '../services/geminiService';
+import { textToImageService } from '../services/textToImageService';
+import { avatarService } from '../services/avatarService';
 
 export class ImageController {
   async generateImage(req: Request, res: Response) {
     try {
-      const { prompt, imageBase64, mimeType } = req.body;
-      const user = req.user!;
-
-      if (!prompt || !imageBase64 || !mimeType) {
-        return res.status(400).json({
-          success: false,
-          message: 'Prompt, image et type MIME requis'
-        });
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Not authenticated' });
       }
-
-      if (user.credits <= 0) {
-        return res.status(403).json({
-          success: false,
-          message: 'Crédits insuffisants'
-        });
-      }
-
-      // Génération de l'image
-      const result = await geminiService.generateImage(prompt, imageBase64, mimeType);
       
-      if (!result.success || !result.imageUrl) {
-        return res.status(500).json({
-          success: false,
-          message: result.error || 'Erreur lors de la génération'
-        });
+      const { prompt, imageBase64, mimeType } = req.body;
+      if (!prompt) {
+        return res.status(400).json({ success: false, message: 'Prompt required' });
       }
 
-      // Transaction pour décrémenter les crédits et sauvegarder l'historique
-      const updatedUser = await prisma.$transaction(async (tx) => {
-        // Décrémenter les crédits
-        const user = await tx.user.update({
-          where: { id: req.user!.id },
-          data: { credits: { decrement: 1 } },
-          select: { id: true, credits: true }
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user || user.credits < 1) {
+        return res.status(400).json({ success: false, message: 'Insufficient credits' });
+      }
+
+      const result = imageBase64 && mimeType
+        ? await avatarService.generateWithFace(prompt, imageBase64, mimeType)
+        : await textToImageService.generateImage(prompt);
+
+      if (result.success) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { credits: { decrement: 1 } }
         });
 
-        // Sauvegarder dans l'historique
-        await tx.imageHistory.create({
+        await prisma.imageHistory.create({
           data: {
-            userId: user.id,
+            userId,
             prompt,
-            imageUrl: result.imageUrl!
+            imageUrl: result.imageUrl || ''
           }
         });
 
-        return user;
-      });
+        return res.json({ success: true, imageUrl: result.imageUrl, credits: user.credits - 1 });
+      }
 
-      res.json({
-        success: true,
-        imageUrl: result.imageUrl,
-        creditsRemaining: updatedUser.credits,
-        message: 'Image générée avec succès'
-      });
-
+      return res.status(500).json({ success: false, message: result.error });
     } catch (error) {
-      console.error('Erreur lors de la génération:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erreur interne du serveur'
-      });
+      console.error('Error generating image:', error);
+      return res.status(500).json({ success: false, message: 'Server error' });
     }
   }
 
   async getHistory(req: Request, res: Response) {
     try {
-      const user = req.user!;
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Not authenticated' });
+      }
 
       const history = await prisma.imageHistory.findMany({
-        where: { userId: user.id },
+        where: { userId },
         orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: {
-          id: true,
-          prompt: true,
-          imageUrl: true,
-          createdAt: true
-        }
+        take: 20
       });
 
-      res.json({
-        success: true,
-        history
-      });
-
+      return res.json({ success: true, history });
     } catch (error) {
-      console.error('Erreur lors de la récupération de l\'historique:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erreur interne du serveur'
-      });
+      console.error('Error fetching history:', error);
+      return res.status(500).json({ success: false, message: 'Server error' });
     }
   }
 }
 
 export const imageController = new ImageController();
+
+export const generateTextToImage = async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Not authenticated' });
+    }
+
+    if (!prompt?.trim()) {
+      return res.status(400).json({ success: false, message: 'Prompt required' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.credits < 1) {
+      return res.status(400).json({ success: false, message: 'Insufficient credits' });
+    }
+
+    const result = await textToImageService.generateImage(prompt);
+
+    if (result.success) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { credits: { decrement: 1 } }
+      });
+
+      await prisma.imageHistory.create({
+        data: { userId, prompt, imageUrl: result.imageUrl || '' }
+      });
+
+      return res.json({ success: true, imageUrl: result.imageUrl, credits: user.credits - 1 });
+    }
+
+    return res.status(500).json({ success: false, message: result.error });
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+export const generateImageToVideo = async (req: Request, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Not authenticated' });
+    }
+
+    const { imageUrl, imageBase64, mimeType, prompt } = req.body;
+    
+    if ((!imageUrl && !imageBase64) || !prompt) {
+      return res.status(400).json({ success: false, message: 'Image and prompt required' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.credits < 5) {
+      return res.status(400).json({ success: false, message: 'Insufficient credits' });
+    }
+
+    return res.json({ success: true, message: 'Video generation started' });
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};

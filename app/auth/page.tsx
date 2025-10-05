@@ -1,125 +1,46 @@
 "use client";
-import React, { useState } from "react";
-import { signIn } from "next-auth/react";
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import React from "react";
+import { useRouter } from "next/navigation";
 
 export default function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setMessage("");
-
-    try {
-      if (isLogin) {
-        const result = await signIn('credentials', {
-          email,
-          password,
-          redirect: false
-        });
-
-        if (result?.error) {
-          setMessage("Email ou mot de passe incorrect");
-        } else {
-          window.location.href = "/";
-        }
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { name }
-          }
-        });
-
-        if (error) {
-          setMessage(error.message);
-        } else {
-          setMessage("Compte créé ! Vérifiez votre email.");
-        }
-      }
-    } catch (error) {
-      setMessage("Une erreur est survenue");
-    }
-
-    setLoading(false);
-  };
-
+  const router = useRouter();
   return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "white", padding: "40px", borderRadius: "20px", maxWidth: "400px", width: "90%" }}>
-        <h1 style={{ textAlign: "center", marginBottom: "30px" }}>
-          {isLogin ? "Connexion" : "Inscription"}
-        </h1>
-
-        <form onSubmit={handleSubmit}>
-          {!isLogin && (
-            <div style={{ marginBottom: "20px" }}>
-              <label style={{ display: "block", marginBottom: "5px" }}>Nom</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required={!isLogin}
-                style={{ width: "100%", padding: "12px", border: "2px solid #e2e8f0", borderRadius: "8px" }}
-              />
-            </div>
-          )}
-
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{ display: "block", marginBottom: "5px" }}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              style={{ width: "100%", padding: "12px", border: "2px solid #e2e8f0", borderRadius: "8px" }}
-            />
-          </div>
-
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{ display: "block", marginBottom: "5px" }}>Mot de passe</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              style={{ width: "100%", padding: "12px", border: "2px solid #e2e8f0", borderRadius: "8px" }}
-            />
-          </div>
-
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: "linear-gradient(135deg, rgba(102, 126, 234, 0.8) 0%, rgba(118, 75, 162, 0.9) 50%, rgba(55, 48, 163, 1) 100%)",
+      padding: "20px"
+    }}>
+      <div style={{
+        background: "white",
+        borderRadius: "20px",
+        padding: "32px",
+        maxWidth: "520px",
+        width: "100%",
+        textAlign: "center",
+        boxShadow: "0 25px 50px rgba(0,0,0,0.1)"
+      }}>
+        <h1 style={{ marginBottom: "10px" }}>Compte</h1>
+        <p style={{ color: "#64748b", marginBottom: "20px" }}>
+          La création de compte sera bientôt disponible sur MonAvatarIA.
+        </p>
+        <p style={{ color: "#64748b", marginBottom: "24px", fontSize: "0.95rem" }}>
+          En attendant, vous pouvez tester l’outil avec <strong>3 crédits gratuits</strong> en mode invité.
+        </p>
+        <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
           <button
-            type="submit"
-            disabled={loading}
-            style={{ width: "100%", padding: "12px", background: loading ? "#a0aec0" : "#48bb78", color: "white", border: "none", borderRadius: "8px", cursor: loading ? "not-allowed" : "pointer", marginBottom: "20px" }}
+            onClick={() => router.push("/")}
+            style={{ padding: "12px 20px", background: "#48bb78", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}
           >
-            {loading ? "Chargement..." : (isLogin ? "Se connecter" : "S'inscrire")}
+            ← Retour à l’accueil
           </button>
-        </form>
-
-        {message && (
-          <div style={{ padding: "10px", background: message.includes("erreur") ? "#fef2f2" : "#f0f8f0", borderRadius: "8px", marginBottom: "20px", textAlign: "center" }}>
-            {message}
-          </div>
-        )}
-
-        <div style={{ textAlign: "center" }}>
           <button
-            onClick={() => setIsLogin(!isLogin)}
-            style={{ background: "none", border: "none", color: "#667eea", cursor: "pointer", textDecoration: "underline" }}
+            onClick={() => router.push("/exemples")}
+            style={{ padding: "12px 20px", background: "#667eea", color: "white", border: "none", borderRadius: "10px", cursor: "pointer", fontWeight: 600 }}
           >
-            {isLogin ? "Créer un compte" : "Déjà un compte ? Se connecter"}
+            Voir des exemples
           </button>
         </div>
       </div>

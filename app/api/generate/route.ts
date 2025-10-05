@@ -2,8 +2,18 @@ import { NextResponse } from "next/server";
 
 export async function POST(req) {
   try {
-    const { prompt, faceImage } = await req.json();
-    console.log("=== GOOGLE IMAGEN GENERATION ===");
+    const body = await req.json();
+    const { prompt, faceImage } = body;
+    
+    if (!faceImage || !prompt) {
+      return NextResponse.json({
+        hasImage: false,
+        message: "Image et prompt requis",
+        shouldRefund: true
+      }, { status: 400 });
+    }
+    
+    console.log("=== GOOGLE IMAGEN HIGH QUALITY ===");
     
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${process.env.GEMINI_API_TOKEN}`,
@@ -24,23 +34,10 @@ export async function POST(req) {
         })
       }
     );
-
+    
     const data = await response.json();
+    console.log("Response:", JSON.stringify(data).slice(0, 200));
     
-    // Vérifier si Google a bloqué la génération
-    if (data.candidates && data.candidates[0] && data.candidates[0].finishReason === "PROHIBITED_CONTENT") {
-      console.log("Content blocked by Google");
-      return NextResponse.json({
-        status: 400,
-        working: false,
-        hasImage: false,
-        error: "CONTENT_BLOCKED",
-        message: "Contenu bloqué par Google. Essayez avec une description différente.",
-        shouldRefund: true
-      });
-    }
-    
-    // Vérifier si une image a été générée
     if (data.candidates && data.candidates[0] && data.candidates[0].content) {
       const parts = data.candidates[0].content.parts;
       const imagePart = parts.find(part => part.inlineData);
@@ -52,32 +49,26 @@ export async function POST(req) {
           working: true,
           hasImage: true,
           imageUrl: `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`,
-          message: "Image générée avec succès!",
-          shouldRefund: false
+          message: "Image haute qualité générée!"
         });
       }
     }
     
-    // Génération échouée - rembourser le crédit
-    console.log("Generation failed - no image returned");
+    console.log("Content blocked by Google");
     return NextResponse.json({
-      status: 500,
+      status: 200,
       working: false,
       hasImage: false,
-      error: "GENERATION_FAILED",
-      message: "Génération échouée. Votre crédit a été remboursé.",
+      message: "Génération échouée - contenu potentiellement bloqué",
       shouldRefund: true
     });
-
+    
   } catch (error) {
-    console.error("API Error:", error);
+    console.error("GEN ERROR:", error);
     return NextResponse.json({ 
-      status: 500,
-      working: false,
       hasImage: false,
-      error: "API_ERROR",
-      message: "Erreur technique. Votre crédit a été remboursé.",
+      message: error.message,
       shouldRefund: true
-    });
+    }, { status: 500 });
   }
 }

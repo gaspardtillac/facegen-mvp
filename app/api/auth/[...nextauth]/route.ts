@@ -1,56 +1,31 @@
-import NextAuth from 'next-auth'
-import { createClient } from '@supabase/supabase-js'
-import CredentialsProvider from 'next-auth/providers/credentials'
+import NextAuth, { NextAuthOptions } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
 
-const handler = NextAuth({
+export const authOptions: NextAuthOptions = {
   providers: [
-    CredentialsProvider({
-      name: 'credentials',
+    Credentials({
+      name: "Credentials",
       credentials: {
-        email: { label: 'Email', type: 'email' },
-        password: { label: 'Password', type: 'password' }
+        email: { label: "Email", type: "text" },
+        password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null
-        
-        const supabase = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
-        
-        const { data: { user }, error } = await supabase.auth.signInWithPassword({
-          email: credentials.email,
-          password: credentials.password,
-        })
-        
-        if (error || !user) return null
-        
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.user_metadata?.name || user.email
-        }
-      }
-    })
+      async authorize() {
+        // Pas de login dans cette version minimaliste
+        return null;
+      },
+    }),
   ],
-  session: { strategy: 'jwt' },
+  session: { strategy: "jwt" },
   callbacks: {
     async session({ session, token }) {
-      if (token.sub) {
-        session.user.id = token.sub
+      if (token?.sub) {
+        // On ajoute l'id au session.user (correction TS)
+        (session.user as any) = { ...(session.user || {}), id: token.sub };
       }
-      return session
+      return session;
     },
-    async jwt({ token, user }) {
-      if (user) {
-        token.sub = user.id
-      }
-      return token
-    }
   },
-  pages: {
-    signIn: '/auth',
-  }
-})
+};
 
-export { handler as GET, handler as POST }
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };

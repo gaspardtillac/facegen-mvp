@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://mon-avatar-ia.vercel.app/sitemap.xml

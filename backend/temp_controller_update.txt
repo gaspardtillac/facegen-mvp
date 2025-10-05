@@ -1,0 +1,48 @@
+export const generateImageToVideo = async (req: Request, res: Response) => {
+  try {
+    const { prompt, imageBase64, mimeType } = req.body;
+    const userId = req.user.id;
+
+    if (!prompt?.trim() || !imageBase64) {
+      return res.status(400).json({ success: false, message: 'Prompt et image requis' });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.credits < 2) {
+      return res.status(400).json({ success: false, message: 'Crédits insuffisants' });
+    }
+
+    // Créer la tâche Kling mais NE PAS attendre le résultat
+    const result = await klingService.createVideoTask(imageBase64, prompt);
+
+    if (result.success && result.taskId) {
+      // Sauvegarder la tâche en base
+      await prisma.videoTask.create({
+        data: {
+          userId,
+          taskId: result.taskId,
+          prompt,
+          status: 'processing'
+        }
+      });
+
+      // Décrémenter les crédits immédiatement
+      await prisma.user.update({
+        where: { id: userId },
+        data: { credits: { decrement: 2 } }
+      });
+
+      res.json({
+        success: true,
+        message: 'Génération en cours, vérifiez votre historique dans quelques minutes',
+        taskId: result.taskId,
+        creditsRemaining: user.credits - 2
+      });
+    } else {
+      res.status(500).json({ success: false, message: result.error });
+    }
+
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Erreur serveur' });
+  }
+};
