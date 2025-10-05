@@ -39,8 +39,7 @@ export async function POST(req: Request) {
     
     if (data.candidates && data.candidates[0] && data.candidates[0].content) {
       const parts = data.candidates[0].content.parts;
-      const imagePart = parts.find(part => part.inlineData);
-      
+const imagePart = parts.find((part: any) => part.inlineData);      
       if (imagePart) {
         console.log("HIGH QUALITY IMAGE GENERATED!");
         return NextResponse.json({
