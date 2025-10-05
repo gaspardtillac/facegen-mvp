@@ -60,8 +60,7 @@ const imagePart = parts.find((part: any) => part.inlineData);
       message: "Génération échouée - contenu potentiellement bloqué",
       shouldRefund: true
     });
-    
-  } catch (error) {
+} catch (error: any) {    
     console.error("GEN ERROR:", error);
     return NextResponse.json({ 
       hasImage: false,
