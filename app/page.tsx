@@ -30,7 +30,8 @@ export default function Home() {
       reader.onload = async (e) => {
         const base64 = e.target?.result as string;
 
-        const res = await fetch("/api/generate", {
+        const res = await 
+fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -90,7 +91,8 @@ export default function Home() {
       reader.onload = async (e) => {
         const base64 = e.target?.result as string;
 
-        const res = await fetch("/api/generate-video", {
+        const res = await 
+fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate-video`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
