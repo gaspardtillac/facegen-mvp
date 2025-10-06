@@ -30,8 +30,7 @@ export default function Home() {
       reader.onload = async (e) => {
         const base64 = e.target?.result as string;
 
-        const res = await 
-fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
+const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -91,8 +90,7 @@ fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
       reader.onload = async (e) => {
         const base64 = e.target?.result as string;
 
-        const res = await 
-fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate-video`, {
+const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/image-to-video`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
