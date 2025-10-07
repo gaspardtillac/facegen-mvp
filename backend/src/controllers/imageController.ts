@@ -6,7 +6,7 @@ import { avatarService } from '../services/avatarService';
 export class ImageController {
   async generateImage(req: Request, res: Response) {
     try {
-      const userId = req.user?.id || 'anonymous';
+      const userId = req.user?.id;
       const { prompt, imageBase64, mimeType } = req.body;
       
       if (!prompt) {
@@ -18,16 +18,19 @@ export class ImageController {
         : await textToImageService.generateImage(prompt);
 
       if (result.success) {
-        try {
-          await prisma.imageHistory.create({
-            data: {
-              userId,
-              prompt,
-              imageUrl: result.imageUrl || ''
-            }
-          });
-        } catch (historyError) {
-          console.log('Could not save to history:', historyError);
+        // Sauvegarder dans l'historique seulement si user authentifié
+        if (userId) {
+          try {
+            await prisma.imageHistory.create({
+              data: {
+                userId,
+                prompt,
+                imageUrl: result.imageUrl || ''
+              }
+            });
+          } catch (historyError) {
+            console.log('Could not save to history:', historyError);
+          }
         }
 
         return res.json({ success: true, imageUrl: result.imageUrl });
