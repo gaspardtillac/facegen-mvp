@@ -4,13 +4,13 @@ import { textToImageService } from '../services/textToImageService';
 import { avatarService } from '../services/avatarService';
 
 export class ImageController {
-async generateImage(req: Request, res: Response) {
+  async generateImage(req: Request, res: Response) {
     try {
-      const userId = req.user?.id || 'anonymous';      
+      const userId = req.user?.id || 'anonymous';
       const { prompt, imageBase64, mimeType } = req.body;
+      
       if (!prompt) {
-        return res.status(400).json({ success: false, message: 'Prompt required' 
-});
+        return res.status(400).json({ success: false, message: 'Prompt required' });
       }
 
       const result = imageBase64 && mimeType
@@ -18,13 +18,17 @@ async generateImage(req: Request, res: Response) {
         : await textToImageService.generateImage(prompt);
 
       if (result.success) {
-        await prisma.imageHistory.create({
-          data: {
-            userId,
-            prompt,
-            imageUrl: result.imageUrl || ''
-          }
-        });
+        try {
+          await prisma.imageHistory.create({
+            data: {
+              userId,
+              prompt,
+              imageUrl: result.imageUrl || ''
+            }
+          });
+        } catch (historyError) {
+          console.log('Could not save to history:', historyError);
+        }
 
         return res.json({ success: true, imageUrl: result.imageUrl });
       }
@@ -35,3 +39,26 @@ async generateImage(req: Request, res: Response) {
       return res.status(500).json({ success: false, message: 'Server error' });
     }
   }
+
+  async getHistory(req: Request, res: Response) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'Not authenticated' });
+      }
+
+      const history = await prisma.imageHistory.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      });
+
+      res.json({ success: true, history });
+    } catch (error) {
+      console.error('Error fetching history:', error);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  }
+}
+
+export const imageController = new ImageController();
