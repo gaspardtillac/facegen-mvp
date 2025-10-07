@@ -18,10 +18,10 @@ const userId = req.user?.id || 'anonymous';
         : await textToImageService.generateImage(prompt);
 
       if (result.success) {
-        await prisma.user.update({
-          where: { id: userId },
-          data: { credits: { decrement: 1 } }
-        });
+//        await prisma.user.update({
+  //        where: { id: userId },
+    //      data: { credits: { decrement: 1 } }
+      //  });
 
         await prisma.imageHistory.create({
           data: {
