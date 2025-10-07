@@ -6,11 +6,7 @@ import { avatarService } from '../services/avatarService';
 export class ImageController {
   async generateImage(req: Request, res: Response) {
     try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ success: false, message: 'Not authenticated' });
-      }
-      
+const userId = req.user?.id || 'anonymous';      
       const { prompt, imageBase64, mimeType } = req.body;
       if (!prompt) {
         return res.status(400).json({ success: false, message: 'Prompt required' });
