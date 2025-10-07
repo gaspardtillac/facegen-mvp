@@ -94,9 +94,7 @@ export const generateTextToImage = async (req: Request, res: Response) => {
         data: { userId, prompt, imageUrl: result.imageUrl || '' }
       });
 
-      return res.json({ success: true, imageUrl: result.imageUrl, credits: user.credits - 1 });
-    }
-
+return res.json({ success: true, imageUrl: result.imageUrl, credits: 999 });
     return res.status(500).json({ success: false, message: result.error });
   } catch (error) {
     console.error('Error:', error);
