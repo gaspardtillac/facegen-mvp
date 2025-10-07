@@ -31,9 +31,7 @@ const userId = req.user?.id || 'anonymous';
           }
         });
 
-        return res.json({ success: true, imageUrl: result.imageUrl, credits: user.credits - 1 });
-      }
-
+return res.json({ success: true, imageUrl: result.imageUrl });
       return res.status(500).json({ success: false, message: result.error });
     } catch (error) {
       console.error('Error generating image:', error);
