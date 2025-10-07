@@ -12,10 +12,6 @@ const userId = req.user?.id || 'anonymous';
         return res.status(400).json({ success: false, message: 'Prompt required' });
       }
 
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (!user || user.credits < 1) {
-        return res.status(400).json({ success: false, message: 'Insufficient credits' });
-      }
 
       const result = imageBase64 && mimeType
         ? await avatarService.generateWithFace(prompt, imageBase64, mimeType)
